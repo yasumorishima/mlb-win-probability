@@ -2,8 +2,8 @@
 """
 MLB Live Test — calls the local FastAPI (port 8001) to verify live WP calculation.
 
-Meant to run on RPi via cron:
-  */5 18-2 * * * /usr/bin/python3 ~/mlb-live-test.py >> ~/mlb-live-test.log 2>&1
+Meant to run on RPi via cron (UTC 17:00-05:00 = JST 02:00-14:00):
+  */5 17-23,0-5 * * * /usr/bin/python3 ~/mlb-live-test.py >> ~/mlb-live-test.log 2>&1
 """
 
 import json
@@ -59,7 +59,7 @@ def main():
         tb = wp_data.get("top_bottom", "?")
         outs = wp_data.get("outs", "?")
         li = wp_data.get("leverage_index", 0)
-        li_lbl = wp_data.get("li_label", "")
+        li_lbl = wp_data.get("leverage_label", "")
         score_h = wp_data.get("score_home", 0)
         score_a = wp_data.get("score_away", 0)
         batter = wp_data.get("batter_name", "")
