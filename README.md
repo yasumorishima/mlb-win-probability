@@ -6,6 +6,8 @@ Real-time Win Probability (WP), Leverage Index (LI), and tactical recommendation
 
 No external data dependencies — pure mathematical model that works for both MLB and NPB scoring environments.
 
+**[Live Demo](https://mlb-wp-engine.streamlit.app/)** | English / 日本語
+
 ## Features
 
 - **Win Probability**: Home team win probability given inning, outs, runners, score
@@ -13,7 +15,9 @@ No external data dependencies — pure mathematical model that works for both ML
 - **WPA (Win Probability Added)**: WP change from a single play
 - **Tactical Recommendations**: RE24-based evaluation of 8 tactical options (bunt, steal, squeeze, etc.)
 - **Matchup Adjustment**: Fine-tune WP with batter OPS and pitcher ERA
+- **Live Feed**: Real-time game state via MLB Stats API (auto-refresh every 30s)
 - **Preset Scenarios**: 6 pre-built game situations for quick analysis
+- **Bilingual UI**: English / Japanese toggle
 
 ## Quick Start
 
