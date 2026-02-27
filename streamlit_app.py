@@ -8,6 +8,7 @@ Standalone — no CSV data needed, pure math engine.
 import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
+from datetime import datetime, timezone
 
 from win_probability import (
     MLB_RPG,
@@ -19,6 +20,7 @@ from win_probability import (
     calculate_li,
     li_label,
 )
+from live_feed import get_todays_games, get_live_state
 
 
 st.set_page_config(
@@ -88,6 +90,120 @@ st.markdown("""
 
 st.markdown("# MLB Win Probability Engine")
 st.markdown("*Markov Chain + RE24 approach — real-time WP, LI, and tactical analysis*")
+st.markdown("---")
+
+
+# ============================================================
+# Live Game Section
+# ============================================================
+
+st.markdown("## Live Games")
+
+_live_state_loaded = None  # will be set if a live game is loaded
+
+with st.container():
+    today_str = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    live_col1, live_col2 = st.columns([3, 1])
+
+    with live_col1:
+        if st.button("Fetch Today's Games", key="fetch_games", use_container_width=True):
+            with st.spinner("Fetching schedule from MLB Stats API..."):
+                games = get_todays_games()
+            st.session_state["todays_games"] = games
+            st.session_state["live_last_fetched"] = today_str
+
+    with live_col2:
+        if st.button("Clear Live", key="clear_live", use_container_width=True):
+            for k in ("todays_games", "live_game_pk", "live_state_cache", "live_last_fetched"):
+                st.session_state.pop(k, None)
+            st.rerun()
+
+    games_list = st.session_state.get("todays_games", [])
+    if games_list:
+        # Build dropdown options — highlight In Progress
+        def _game_label(g: dict) -> str:
+            status_icon = "🔴" if g["status"] == "In Progress" else "⚪" if g["status"] == "Final" else "🕒"
+            return f"{status_icon} {g['away_team']} @ {g['home_team']}  [{g['status']}]"
+
+        game_options = {g["gamePk"]: _game_label(g) for g in games_list}
+        selected_pk = st.selectbox(
+            f"Select game ({len(games_list)} games on {today_str})",
+            options=list(game_options.keys()),
+            format_func=lambda pk: game_options[pk],
+            key="live_game_select",
+        )
+
+        load_col, refresh_col = st.columns([2, 1])
+        with load_col:
+            load_live = st.button("Load Live State", key="load_live", use_container_width=True)
+        with refresh_col:
+            auto_refresh = st.checkbox("Auto-refresh (30s)", key="auto_refresh")
+
+        if load_live:
+            with st.spinner("Fetching live game state..."):
+                live_state = get_live_state(selected_pk)
+            if live_state:
+                st.session_state["live_state_cache"] = live_state
+                st.session_state["live_game_pk"] = selected_pk
+            else:
+                st.warning("Could not fetch live state. Game may not be active yet.")
+
+        # Auto-refresh logic
+        if auto_refresh and st.session_state.get("live_game_pk"):
+            import time
+            if "live_last_refresh" not in st.session_state:
+                st.session_state["live_last_refresh"] = time.time()
+            elapsed = time.time() - st.session_state.get("live_last_refresh", 0)
+            if elapsed >= 30:
+                live_state = get_live_state(st.session_state["live_game_pk"])
+                if live_state:
+                    st.session_state["live_state_cache"] = live_state
+                st.session_state["live_last_refresh"] = time.time()
+                st.rerun()
+            else:
+                remaining = int(30 - elapsed)
+                st.caption(f"Next refresh in {remaining}s")
+
+        # Display cached live state
+        cached = st.session_state.get("live_state_cache")
+        if cached:
+            st.markdown(f"""
+            <div style="background: #141428; border: 1px solid #00e5ff44; border-radius: 10px; padding: 14px; margin: 8px 0;">
+                <span style="color: #00e5ff; font-weight: bold; font-size: 1.1rem;">
+                    {cached['away_team']} @ {cached['home_team']}
+                </span>
+                &nbsp;
+                <span style="color: #aaa; font-size: 0.9rem;">{cached['status']}</span>
+                <br>
+                <span style="color: #e0e0e0; font-size: 1.2rem; font-weight: bold;">
+                    Away {cached['score_away']} — Home {cached['score_home']}
+                </span>
+                &nbsp;&nbsp;
+                <span style="color: #888; font-size: 0.9rem;">
+                    {'Top' if cached['top_bottom'] == 'top' else 'Bot'} {cached['inning']}
+                    | {cached['outs']} out
+                    | Runners: {'1B ' if cached['runners'][0] else ''}{'2B ' if cached['runners'][1] else ''}{'3B' if cached['runners'][2] else '---'}
+                </span>
+                <br>
+                <span style="color: #ccc; font-size: 0.85rem;">
+                    🥎 {cached['batter_name'] or '—'} &nbsp; ⚾ {cached['pitcher_name'] or '—'}
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if st.button("Apply to Analysis ↓", key="apply_live", use_container_width=True):
+                st.session_state["_preset"] = {
+                    "inning": cached["inning"],
+                    "top_bottom": cached["top_bottom"],
+                    "outs": cached["outs"],
+                    "runners": cached["runners"],
+                    "score_diff": cached["score_diff"],
+                }
+                st.rerun()
+
+    elif not games_list and st.session_state.get("live_last_fetched"):
+        st.info("No games found for today.")
+
 st.markdown("---")
 
 

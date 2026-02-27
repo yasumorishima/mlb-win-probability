@@ -22,6 +22,7 @@ from win_probability import (
     get_re24_table,
     li_label,
 )
+from live_feed import get_todays_games, get_live_state, get_live_wp
 
 app = FastAPI(
     title="MLB Win Probability API",
@@ -65,12 +66,14 @@ class ScenarioName(str, Enum):
 def root():
     return {
         "name": "MLB Win Probability API",
-        "version": "0.1.0",
+        "version": "0.2.0",
         "endpoints": [
             "/wp",
             "/wp/play",
             "/re24",
             "/wp/scenario",
+            "/games/today",
+            "/wp/live/{gamePk}",
         ],
         "scenarios": list(SCENARIOS.keys()),
     }
@@ -183,4 +186,35 @@ def get_scenario(
     runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment"),
 ):
     result = analyze_scenario(name.value, runs_per_game)
+    return result
+
+
+@app.get(
+    "/games/today",
+    summary="Today's MLB Schedule",
+    description="Return today's MLB games with status (Scheduled / In Progress / Final).",
+)
+def games_today(
+    date: str | None = Query(default=None, description="Date in YYYY-MM-DD (default: today UTC)"),
+):
+    games = get_todays_games(date)
+    return {"date": date or "today", "count": len(games), "games": games}
+
+
+@app.get(
+    "/wp/live/{game_pk}",
+    summary="Live Win Probability for a Game",
+    description=(
+        "Fetch live game state from MLB Stats API and compute Win Probability + LI + tactics.\n\n"
+        "Use `/games/today` to get valid `gamePk` values."
+    ),
+)
+def wp_live(
+    game_pk: int,
+    runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment (MLB=4.5, NPB=4.0)"),
+):
+    from fastapi import HTTPException
+    result = get_live_wp(game_pk, runs_per_game)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"Game {game_pk} not found or API unavailable")
     return result
