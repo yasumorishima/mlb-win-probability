@@ -121,6 +121,79 @@ def get_live_state(game_pk: int) -> dict | None:
     }
 
 
+def get_game_plays(game_pk: int) -> list[dict]:
+    """
+    Return all completed plays from a game, suitable for Replay Mode.
+
+    Each dict has keys:
+        inning, top_bottom, outs, runners (tuple[int,int,int]),
+        score_diff (home−away at START of play),
+        home_score, away_score (after play),
+        description, event, batter, pitcher, home_team, away_team
+    """
+    data = _fetch(f"{_BASE}/v1.1/game/{game_pk}/feed/live")
+    if data is None:
+        return []
+
+    teams = data.get("gameData", {}).get("teams", {})
+    home_team = teams.get("home", {}).get("name", "Home")
+    away_team = teams.get("away", {}).get("name", "Away")
+
+    all_plays = data.get("liveData", {}).get("plays", {}).get("allPlays", [])
+
+    plays = []
+    prev_home = 0
+    prev_away = 0
+
+    for play in all_plays:
+        if not play.get("about", {}).get("isComplete", False):
+            continue
+
+        about = play["about"]
+        result = play.get("result", {})
+        matchup = play.get("matchup", {})
+        runners_list = play.get("runners", [])
+
+        inning = about.get("inning", 1)
+        top_bottom = "bottom" if not about.get("isTopInning", True) else "top"
+        outs = min(about.get("outs", 0), 2)
+
+        # Runners at START of play (originBase = where they stood before)
+        runners_before = {"1B": 0, "2B": 0, "3B": 0}
+        for r in runners_list:
+            start = r.get("movement", {}).get("originBase")
+            if start in ["1B", "2B", "3B"]:
+                runners_before[start] = 1
+
+        # Score at START = previous play's end state
+        score_diff = prev_home - prev_away
+
+        # Score AFTER this play
+        home_score = result.get("homeScore", prev_home)
+        away_score = result.get("awayScore", prev_away)
+
+        plays.append({
+            "inning": inning,
+            "top_bottom": top_bottom,
+            "outs": outs,
+            "runners": (runners_before["1B"], runners_before["2B"], runners_before["3B"]),
+            "score_diff": score_diff,
+            "home_score": home_score,
+            "away_score": away_score,
+            "description": result.get("description", ""),
+            "event": result.get("event", ""),
+            "batter": matchup.get("batter", {}).get("fullName", ""),
+            "pitcher": matchup.get("pitcher", {}).get("fullName", ""),
+            "home_team": home_team,
+            "away_team": away_team,
+        })
+
+        prev_home = home_score
+        prev_away = away_score
+
+    return plays
+
+
 def get_live_wp(game_pk: int, runs_per_game: float = 4.5) -> dict | None:
     """
     Fetch live game state and compute Win Probability + full analysis.

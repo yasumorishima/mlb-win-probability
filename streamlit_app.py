@@ -5,6 +5,7 @@ Dark theme UI — bilingual (EN / JA).
 Standalone — no CSV data needed, pure math engine.
 """
 
+import time
 import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
@@ -20,7 +21,7 @@ from win_probability import (
     calculate_li,
     li_label,
 )
-from live_feed import get_todays_games, get_live_state
+from live_feed import get_todays_games, get_live_state, get_game_plays
 
 
 st.set_page_config(
@@ -35,6 +36,7 @@ st.set_page_config(
 # ============================================================
 
 lang = st.sidebar.radio("Language / 言語", ["EN", "JA"], horizontal=True)
+mode = st.sidebar.radio("Mode", ["⚾ WP Calculator", "🎬 Replay Mode"], horizontal=True, label_visibility="collapsed")
 
 T = {
     "EN": {
@@ -231,6 +233,193 @@ st.markdown("""
 st.markdown(f"# {_['title']}")
 st.markdown(f"*{_['subtitle']}*")
 st.markdown("---")
+
+
+# ============================================================
+# Replay Mode
+# ============================================================
+
+if mode == "🎬 Replay Mode":
+    st.markdown("## 🎬 Replay Mode")
+    st.caption("Select any past MLB game and replay it play-by-play with live WP updates." if lang == "EN" else "過去の試合を選んで1プレーずつWPをリプレイ")
+    st.markdown("---")
+
+    # Date + game selector
+    col_date, col_load = st.columns([2, 1])
+    with col_date:
+        replay_date = st.date_input("Game Date", value=datetime.now(timezone.utc).date())
+    with col_load:
+        st.write("")
+        load_games_btn = st.button("Load Games", use_container_width=True, type="primary")
+
+    if load_games_btn:
+        with st.spinner("Fetching schedule..."):
+            _games = get_todays_games(replay_date.strftime("%Y-%m-%d"))
+        st.session_state["replay_games"] = _games
+        st.session_state.pop("replay_plays", None)
+        st.session_state.pop("replay_idx", None)
+
+    replay_games = st.session_state.get("replay_games", [])
+
+    if replay_games:
+        game_opts = {f"{g['away_team']} @ {g['home_team']}  [{g['status']}]": g["gamePk"] for g in replay_games}
+        sel_label = st.selectbox("Select Game", list(game_opts.keys()))
+        sel_pk = game_opts[sel_label]
+
+        if st.button("▶ Load Replay", use_container_width=True, type="primary"):
+            with st.spinner("Loading play-by-play data..."):
+                _plays = get_game_plays(sel_pk)
+            if _plays:
+                st.session_state["replay_plays"] = _plays
+                st.session_state["replay_idx"] = 0
+                st.session_state["replay_playing"] = False
+            else:
+                st.error("No play data found. The game may not have started or data is unavailable.")
+
+    plays = st.session_state.get("replay_plays", [])
+
+    if plays:
+        n = len(plays)
+        idx = st.session_state.get("replay_idx", 0)
+        idx = max(0, min(idx, n - 1))
+
+        # Progress bar
+        st.progress(idx / max(n - 1, 1), text=f"Play {idx + 1} / {n}")
+
+        # Controls
+        ctrl1, ctrl2, ctrl3, ctrl4, ctrl5 = st.columns([1, 1, 2, 1, 2])
+        with ctrl1:
+            if st.button("⏮", help="First"):
+                st.session_state["replay_idx"] = 0
+                st.session_state["replay_playing"] = False
+                st.rerun()
+        with ctrl2:
+            if st.button("◀", help="Prev"):
+                st.session_state["replay_idx"] = max(0, idx - 1)
+                st.session_state["replay_playing"] = False
+                st.rerun()
+        with ctrl3:
+            is_playing = st.session_state.get("replay_playing", False)
+            if st.button("⏸ Pause" if is_playing else "▶ Play", use_container_width=True):
+                st.session_state["replay_playing"] = not is_playing
+                st.rerun()
+        with ctrl4:
+            if st.button("▶", help="Next"):
+                st.session_state["replay_idx"] = min(n - 1, idx + 1)
+                st.session_state["replay_playing"] = False
+                st.rerun()
+        with ctrl5:
+            speed = st.select_slider("Speed", options=[0.5, 1.0, 2.0, 3.0],
+                                     value=st.session_state.get("replay_speed", 1.0),
+                                     format_func=lambda x: f"{x}s/play")
+            st.session_state["replay_speed"] = speed
+
+        # Current play data
+        play = plays[idx]
+        res = full_analysis(play["inning"], play["top_bottom"], play["outs"],
+                            play["runners"], play["score_diff"], MLB_RPG)
+        wp = res["win_probability"]
+        li_val = res["leverage_index"]
+        li_lbl = res["leverage_label"]
+
+        # Score header
+        st.markdown(
+            f"### {play['away_team']} **{play['away_score']}** — "
+            f"**{play['home_score']}** {play['home_team']}  "
+            f"| {'Top' if play['top_bottom'] == 'top' else 'Bot'} {play['inning']} · {play['outs']} out"
+        )
+        if play["batter"] or play["pitcher"]:
+            st.caption(f"🏏 {play['batter']}  ⚔  ⚾ {play['pitcher']}")
+
+        # Play description card
+        if play["description"]:
+            event_color = {
+                "Home Run": "#ffd700", "Single": "#4caf50", "Double": "#00e5ff",
+                "Triple": "#ff9800", "Walk": "#9c27b0", "Strikeout": "#f44336",
+            }.get(play["event"], "#aaaaaa")
+            st.markdown(
+                f'<div style="background:#141428;border-left:4px solid {event_color};'
+                f'padding:12px 16px;border-radius:0 8px 8px 0;margin:8px 0;">'
+                f'<strong style="color:{event_color};">{play["event"]}</strong> — '
+                f'<span style="color:#ccc;">{play["description"]}</span></div>',
+                unsafe_allow_html=True,
+            )
+
+        # Diamond + WP gauge + LI
+        r1, r2, r3 = play["runners"]
+        col_diamond, col_gauge, col_li = st.columns([1, 2, 1])
+
+        with col_diamond:
+            r1c = "#00e5ff" if r1 else "#333"
+            r2c = "#00e5ff" if r2 else "#333"
+            r3c = "#00e5ff" if r3 else "#333"
+            inn_lbl = f"{'Top' if play['top_bottom'] == 'top' else 'Bot'} {play['inning']} | {play['outs']} out"
+            components.html(f"""<svg width="140" height="140" viewBox="0 0 140 140">
+                <rect x="0" y="0" width="140" height="140" fill="#0a0a1a"/>
+                <line x1="70" y1="120" x2="120" y2="70" stroke="#444" stroke-width="2"/>
+                <line x1="120" y1="70" x2="70" y2="20" stroke="#444" stroke-width="2"/>
+                <line x1="70" y1="20" x2="20" y2="70" stroke="#444" stroke-width="2"/>
+                <line x1="20" y1="70" x2="70" y2="120" stroke="#444" stroke-width="2"/>
+                <polygon points="70,115 65,120 70,125 75,120" fill="#fff"/>
+                <rect x="113" y="63" width="14" height="14" rx="2" fill="{r1c}" transform="rotate(45 120 70)"/>
+                <rect x="63" y="13" width="14" height="14" rx="2" fill="{r2c}" transform="rotate(45 70 20)"/>
+                <rect x="13" y="63" width="14" height="14" rx="2" fill="{r3c}" transform="rotate(45 20 70)"/>
+                <text x="70" y="138" fill="#666" font-size="10" text-anchor="middle">{inn_lbl}</text>
+            </svg>""", height=145)
+            sd = play["score_diff"]
+            if sd > 0:
+                st.markdown(f"**{play['home_team']} +{sd}**")
+            elif sd < 0:
+                st.markdown(f"**{play['away_team']} +{abs(sd)}**")
+            else:
+                st.markdown("**Tie game**")
+
+        with col_gauge:
+            gauge_color = "#4caf50" if wp > 0.55 else "#ff9800" if wp > 0.45 else "#f44336"
+            fig_r = go.Figure(go.Indicator(
+                mode="gauge+number",
+                value=wp * 100,
+                title={"text": f"Win Prob ({play['home_team']})", "font": {"color": "#e0e0e0", "size": 13}},
+                number={"suffix": "%", "font": {"size": 48, "color": "#00e5ff"}},
+                gauge={
+                    "axis": {"range": [0, 100], "tickcolor": "#666"},
+                    "bar": {"color": gauge_color},
+                    "bgcolor": "#1a1a3e",
+                    "bordercolor": "#00e5ff33",
+                    "steps": [
+                        {"range": [0, 30], "color": "#1a0a0a"},
+                        {"range": [30, 50], "color": "#1a1a0a"},
+                        {"range": [50, 70], "color": "#0a1a0a"},
+                        {"range": [70, 100], "color": "#0a2a0a"},
+                    ],
+                },
+            ))
+            fig_r.update_layout(paper_bgcolor="#0a0a1a", plot_bgcolor="#0a0a1a",
+                                font={"color": "#e0e0e0"}, height=250,
+                                margin=dict(t=30, b=10, l=30, r=30))
+            st.plotly_chart(fig_r, use_container_width=True)
+
+        with col_li:
+            badge_cls = {"Low": "li-low", "Medium": "li-medium",
+                         "High": "li-high", "Very High": "li-veryhigh"}.get(li_lbl, "li-medium")
+            st.markdown(f"""
+            <div class="metric-card" style="text-align:center;">
+                <div class="metric-value">{li_val:.1f}</div>
+                <div class="metric-label">Leverage Index</div>
+                <div style="margin-top:8px;"><span class="li-badge {badge_cls}">{li_lbl}</span></div>
+            </div>""", unsafe_allow_html=True)
+
+        # Auto-play
+        if st.session_state.get("replay_playing", False):
+            if idx < n - 1:
+                time.sleep(speed)
+                st.session_state["replay_idx"] = idx + 1
+                st.rerun()
+            else:
+                st.session_state["replay_playing"] = False
+                st.success("🏁 Replay complete!")
+
+    st.stop()
 
 
 # ============================================================
