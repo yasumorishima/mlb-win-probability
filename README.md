@@ -1,12 +1,17 @@
 # MLB Win Probability Engine
 
-Real-time Win Probability (WP), Leverage Index (LI), and tactical recommendations from game state inputs.
+イニング・アウト・走者・点差を入力すると、**ホーム勝率・局面の重要度・戦術提案**をリアルタイムで返すエンジン。
 
-**Approach**: Markov Chain + RE24 (Run Expectancy by 24 base-out states) + Normal distribution approximation.
+**[Live Demo](https://mlb-wp-engine.streamlit.app/)** | English / 日本語 | MLB / NPB 対応
 
-No external data dependencies — pure mathematical model that works for both MLB and NPB scoring environments.
+---
 
-**[Live Demo](https://mlb-wp-engine.streamlit.app/)** | English / 日本語
+**計算の仕組み（3層構造）：**
+1. **RE24** — 24通りの走者×アウト状況ごとに「この回に何点取れるか」の期待値テーブル
+2. **Markov Chain** — 打席ごとの状態遷移（三振/単打/本塁打…）を確率モデルで繋ぎ、得点分布を推定
+3. **Normal approximation** — 残りイニングの得点分布から最終的な勝率を計算
+
+外部データ不要・純粋な数理モデルのため MLB / NPB どちらでも動作します。
 
 ## Features
 
@@ -116,7 +121,9 @@ Evaluates 8 tactics by comparing expected RE24 values:
 
 Each tactic has preconditions (e.g., steal requires a runner) and a success probability. The expected RE24 delta determines the recommendation.
 
-## Scoring Environment
+## Scoring Environment（得点環境の調整）
+
+得点の多い/少ないリーグでは勝率の変動幅も変わります。`runs_per_game` パラメータで切り替え可能。
 
 | League | Runs/Game | Parameter |
 |--------|-----------|-----------|
