@@ -243,6 +243,11 @@ def main():
 
     if args.wandb:
         import wandb
+        wandb.init(
+            project="mlb-win-probability-scripts",
+            name="optimization-summary",
+            tags=["summary"],
+        )
         wandb.log({
             "best_brier": best.value,
             "improvement_pct": improvement,
