@@ -1,4 +1,4 @@
 matplotlib>=3.7
 optuna>=3.5
-optuna-integration[wandb]>=3.5
+optuna-integration>=3.5
 wandb>=0.16
