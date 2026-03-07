@@ -121,6 +121,53 @@ Evaluates 8 tactics by comparing expected RE24 values:
 
 Each tactic has preconditions (e.g., steal requires a runner) and a success probability. The expected RE24 delta determines the recommendation.
 
+## Model Validation（精度検証）
+
+GitHub Actions で 2024 シーズン全試合（~2,430 試合・~170,000 打席）の play-by-play データを取得し、自作 WP モデルの精度を定量検証しています。
+
+### 検証パイプライン
+
+```
+MLB Stats API → play-by-play CSV → WP算出 → 実際の勝敗と比較
+                                  ↓
+                          RE24再計算（実データ vs ハードコード値）
+                                  ↓
+                          Optuna 500trial パラメータ最適化
+```
+
+### メトリクス
+
+| Metric | Description |
+|--------|-------------|
+| Brier Score | 確率予測の代表的評価指標。mean((predicted - actual)^2)、低いほど良い |
+| Brier Skill Score | 常に 50% と予測するベースラインとの比較。正なら改善 |
+| ECE (Expected Calibration Error) | 予測値と実際の勝率のズレ。0 に近いほど校正が正確 |
+| Log Loss | 確信度の高い誤予測を重く罰するスコアリングルール |
+| MAE by Inning | イニング別の平均絶対誤差。終盤の精度を個別に評価 |
+
+### 検証ワークフロー
+
+```bash
+gh workflow run "Validate WP Model" \
+  --repo yasumorishima/mlb-win-probability \
+  -f memo="2024 full season validation" \
+  -f season=2024 \
+  -f optimize=true \
+  -f n_trials=500
+```
+
+### パラメータ最適化
+
+現在のモデルには以下のパラメータがあり、Optuna（TPE sampler）で最適値を探索：
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `variance_factor` | 残りイニングの得点分布の分散係数 | 1.3 |
+| `scoring_factor` | 9回裏同点時のサヨナラ確率スケーリング | 1.8 |
+| `behind_lambda_mult` | 9回裏ビハインド時のPoisson λ倍率 | 1.5 |
+| `top9_lambda_mult` | 9回表ホームリード時のPoisson λ倍率 | 1.3 |
+| `extras_win_prob` | 延長戦突入時のホーム勝率 | 0.50 |
+
 ## Scoring Environment（得点環境の調整）
 
 得点の多い/少ないリーグでは勝率の変動幅も変わります。`runs_per_game` パラメータで切り替え可能。
