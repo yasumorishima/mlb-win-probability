@@ -1,0 +1,205 @@
+name: Validate WP Model
+
+on:
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: "What triggered this run?"
+        required: true
+      season:
+        description: "Season year"
+        required: true
+        default: "2024"
+      start_date:
+        description: "Start date (YYYY-MM-DD, blank = season default)"
+        required: false
+      end_date:
+        description: "End date (YYYY-MM-DD, blank = season default)"
+        required: false
+      optimize:
+        description: "Run Optuna parameter optimization?"
+        required: false
+        default: "true"
+      n_trials:
+        description: "Number of Optuna trials"
+        required: false
+        default: "500"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-validate.txt
+
+      - name: Determine date range
+        id: dates
+        run: |
+          SEASON="${{ github.event.inputs.season }}"
+          START="${{ github.event.inputs.start_date }}"
+          END="${{ github.event.inputs.end_date }}"
+          if [ -z "$START" ]; then START="${SEASON}-03-20"; fi
+          if [ -z "$END" ]; then END="${SEASON}-09-29"; fi
+          echo "start=$START" >> $GITHUB_OUTPUT
+          echo "end=$END" >> $GITHUB_OUTPUT
+          echo "Date range: $START to $END"
+
+      - name: Fetch play-by-play data
+        run: |
+          python scripts/fetch_game_states.py \
+            --start-date ${{ steps.dates.outputs.start }} \
+            --end-date ${{ steps.dates.outputs.end }} \
+            --delay 0.5
+
+      - name: Validate WP model (current params)
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+        run: |
+          python scripts/validate_wp.py \
+            --input data/play_states_${{ github.event.inputs.season }}.csv \
+            --output-dir results/ \
+            --wandb
+
+      - name: Recalculate RE24 from data
+        run: |
+          python scripts/recalculate_re24.py \
+            --input data/play_states_${{ github.event.inputs.season }}.csv \
+            --output results/re24_computed.json
+
+      - name: Optimize parameters
+        if: ${{ github.event.inputs.optimize == 'true' }}
+        env:
+          WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+        run: |
+          python scripts/optimize_params.py \
+            --input data/play_states_${{ github.event.inputs.season }}.csv \
+            --n-trials ${{ github.event.inputs.n_trials }} \
+            --output results/optimized_params.json \
+            --wandb
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: validation-results-${{ github.event.inputs.season }}
+          path: |
+            results/
+            data/play_states_*.csv
+          retention-days: 90
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## WP Model Validation Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Season**: ${{ github.event.inputs.season }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Memo**: ${{ github.event.inputs.memo }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f results/validation_metrics.json ]; then
+            echo "### Current Model Metrics" >> $GITHUB_STEP_SUMMARY
+            python -c "
+          import json
+          m = json.load(open('results/validation_metrics.json'))
+          print(f'| Metric | Value |')
+          print(f'|--------|-------|')
+          print(f'| Brier Score | {m[\"brier_score\"]:.6f} |')
+          print(f'| Brier Skill Score | {m[\"brier_skill_score\"]:.4f} |')
+          print(f'| Log Loss | {m[\"log_loss\"]:.6f} |')
+          print(f'| ECE | {m[\"ece\"]:.4f} |')
+          print(f'| Games | {m[\"n_games\"]} |')
+          print(f'| Play States | {m[\"n_plays\"]:,} |')
+          print()
+          print('### Calibration')
+          print('| Bin | Predicted | Actual | Error | N |')
+          print('|-----|-----------|--------|-------|---|')
+          for c in m['calibration']:
+              print(f'| {c[\"bin\"]} | {c[\"mean_predicted\"]:.3f} | {c[\"actual_win_rate\"]:.3f} | {c[\"abs_error\"]:.3f} | {c[\"count\"]:,} |')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f results/optimized_params.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Optimized Parameters" >> $GITHUB_STEP_SUMMARY
+            python -c "
+          import json
+          r = json.load(open('results/optimized_params.json'))
+          print(f'| Parameter | Default | Optimized |')
+          print(f'|-----------|---------|-----------|')
+          for k in sorted(r['default_params'].keys()):
+              d = r['default_params'][k]
+              b = r['best_params'][k]
+              print(f'| {k} | {d} | {b:.4f} |')
+          print()
+          print(f'Baseline Brier: {r[\"baseline_brier\"]:.6f}')
+          print(f'Optimized Brier: {r[\"best_brier\"]:.6f}')
+          print(f'Improvement: {r[\"improvement_pct\"]:+.2f}%')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Discord notification
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "No Discord webhook configured, skipping"
+            exit 0
+          fi
+
+          STATUS="${{ job.status }}"
+          SEASON="${{ github.event.inputs.season }}"
+          MEMO="${{ github.event.inputs.memo }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          if [ "$STATUS" = "success" ]; then
+            COLOR=3066993
+            TITLE="WP Validation Complete"
+            # Extract key metrics
+            if [ -f results/validation_metrics.json ]; then
+              METRICS=$(python -c "
+          import json
+          m = json.load(open('results/validation_metrics.json'))
+          print(f'Brier: {m[\"brier_score\"]:.6f} (skill: {m[\"brier_skill_score\"]:.4f})')
+          print(f'ECE: {m[\"ece\"]:.4f} | Games: {m[\"n_games\"]} | Plays: {m[\"n_plays\"]:,}')
+          ")
+            else
+              METRICS="Metrics file not found"
+            fi
+            if [ -f results/optimized_params.json ]; then
+              OPT=$(python -c "
+          import json
+          r = json.load(open('results/optimized_params.json'))
+          print(f'Optuna: {r[\"improvement_pct\"]:+.2f}% improvement ({r[\"baseline_brier\"]:.6f} -> {r[\"best_brier\"]:.6f})')
+          ")
+              METRICS="${METRICS}\n${OPT}"
+            fi
+            DESC="${METRICS}\nSeason: ${SEASON} | ${MEMO}"
+          else
+            COLOR=15158332
+            TITLE="WP Validation FAILED"
+            DESC="Season: ${SEASON} | ${MEMO}\nCheck: ${RUN_URL}"
+          fi
+
+          PAYLOAD=$(cat <<HEREDOC
+          {
+            "embeds": [{
+              "title": "${TITLE}",
+              "description": "$(echo -e "$DESC")",
+              "color": ${COLOR},
+              "url": "${RUN_URL}",
+              "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            }]
+          }
+          HEREDOC
+          )
+
+          curl -s -H "Content-Type: application/json" \
+            -d "$PAYLOAD" \
+            "$DISCORD_WEBHOOK_URL"
