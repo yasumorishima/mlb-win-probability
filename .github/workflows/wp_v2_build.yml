@@ -1,0 +1,212 @@
+name: Build WP v2
+
+on:
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: 'Purpose of this run'
+        required: true
+        type: string
+      step:
+        description: 'Which step to run'
+        required: true
+        default: 'wp_v2_full'
+        type: choice
+        options:
+          - fetch_historical
+          - build_and_compare
+          - wp_v2_full
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install base dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install ML dependencies
+        if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        run: pip install -r requirements-wp-v2.txt -r requirements-validate.txt
+
+      - name: Restore cached play-by-play data
+        uses: actions/cache/restore@v4
+        id: cache-restore
+        with:
+          path: data/play_states_*.csv
+          key: play-states-2015-2024-v3
+
+      - name: Fetch historical play-by-play (2015-2024)
+        if: inputs.step == 'fetch_historical' || inputs.step == 'wp_v2_full'
+        run: |
+          mkdir -p data
+          for year in $(seq 2015 2024); do
+            CSV="data/play_states_${year}.csv"
+            if [ -f "$CSV" ]; then
+              LINES=$(wc -l < "$CSV")
+              echo "=== $year: $CSV exists ($((LINES - 1)) plays, will resume) ==="
+            else
+              echo "=== $year: fetching from scratch ==="
+            fi
+            python scripts/fetch_game_states.py \
+              --start-date ${year}-03-20 \
+              --end-date ${year}-10-10 \
+              --delay 0.3
+          done
+          echo ""
+          echo "=== Summary ==="
+          total=0
+          for f in data/play_states_*.csv; do
+            if [ -f "$f" ]; then
+              lines=$(($(wc -l < "$f") - 1))
+              total=$((total + lines))
+              echo "  $(basename $f): ${lines} plays"
+            fi
+          done
+          echo "  TOTAL: ${total} plays"
+
+      - name: Save play-by-play cache
+        if: inputs.step == 'fetch_historical' || inputs.step == 'wp_v2_full'
+        uses: actions/cache/save@v4
+        with:
+          path: data/play_states_*.csv
+          key: play-states-2015-2024-v3
+
+      - name: Build empirical WP table + Markov chain (all years)
+        if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        run: |
+          python scripts/build_wp_v2.py \
+            --data-dir data/ \
+            --output-dir data/ \
+            --n-sims 500000
+
+      - name: Train LightGBM ML model
+        if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        run: |
+          python scripts/train_wp_lgbm.py \
+            --data-dir data/ \
+            --output-dir data/
+
+      - name: Compare all WP engines (fair holdout)
+        if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        run: |
+          mkdir -p results
+          python scripts/compare_wp_engines.py \
+            --data-dir data/ \
+            --output-dir results/
+
+      - name: Commit derived files
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add \
+            data/empirical_wp_table.json \
+            data/markov_transitions.json \
+            data/halfinn_run_dist.json \
+            data/wp_lgbm_model.txt \
+            data/wp_lgbm_metrics.json \
+            2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "CI: ${{ inputs.step }} — WP v2 empirical table + Markov + LightGBM"
+            git pull --rebase
+            git push
+          fi
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wp-v2-results
+          path: |
+            results/
+            data/empirical_wp_table.json
+            data/halfinn_run_dist.json
+            data/wp_lgbm_metrics.json
+          retention-days: 90
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## WP v2 Build Results" >> $GITHUB_STEP_SUMMARY
+          echo "**Memo**: ${{ inputs.memo }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Step**: ${{ inputs.step }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f results/wp_engine_comparison.json ]; then
+            python -c "
+          import json
+          r = json.load(open('results/wp_engine_comparison.json'))
+          print(f'### Engine Comparison (Test: {r[\"test_year\"]}, {r[\"n_plays\"]:,} plays)')
+          print()
+          print('| Engine | Brier | BSS | Log Loss | ECE |')
+          print('|--------|-------|-----|----------|-----|')
+          for name, m in r['results'].items():
+              print(f'| {name} | {m[\"brier\"]:.6f} | {m[\"brier_skill\"]:.4f} | {m[\"log_loss\"]:.6f} | {m[\"ece\"]:.4f} |')
+          print()
+          v1 = r['results'].get('v1_normal', {}).get('brier')
+          if v1:
+              for name, m in r['results'].items():
+                  if name != 'v1_normal':
+                      imp = (v1 - m['brier']) / v1 * 100
+                      print(f'**{name}** vs v1: **{imp:+.2f}%** Brier improvement')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f data/wp_lgbm_metrics.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### LightGBM Feature Importance" >> $GITHUB_STEP_SUMMARY
+            python -c "
+          import json
+          m = json.load(open('data/wp_lgbm_metrics.json'))
+          print('| Feature | Gain |')
+          print('|---------|------|')
+          for name, gain in sorted(m['feature_importance'].items(), key=lambda x: -x[1]):
+              print(f'| {name} | {gain:.1f} |')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Discord notification
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then
+            echo "No Discord webhook configured, skipping"
+            exit 0
+          fi
+
+          STATUS="${{ job.status }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          if [ "$STATUS" = "success" ]; then EMOJI="✅"; else EMOJI="❌"; fi
+
+          BODY="${EMOJI} **mlb-win-probability** WP v2 \`${{ inputs.step }}\` ${STATUS}"
+          if [ -f results/wp_engine_comparison.json ]; then
+            METRICS=$(python -c "
+          import json
+          r = json.load(open('results/wp_engine_comparison.json'))
+          for name, m in r['results'].items():
+              print(f'{name}: Brier={m[\"brier\"]:.4f}')
+          v1 = r['results'].get('v1_normal', {}).get('brier')
+          if v1:
+              for name, m in r['results'].items():
+                  if name != 'v1_normal':
+                      imp = (v1 - m['brier']) / v1 * 100
+                      print(f'{name} vs v1: {imp:+.1f}%')
+          ")
+            BODY="${BODY}\n${METRICS}"
+          fi
+          BODY="${BODY}\n${RUN_URL}"
+
+          curl -s -H "Content-Type: application/json" \
+            -d "{\"content\": \"$(echo -e "$BODY")\"}" \
+            "$DISCORD_WEBHOOK_URL"
