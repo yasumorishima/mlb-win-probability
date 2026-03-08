@@ -138,7 +138,7 @@ def calculate_wp(inning: int, top_bottom: str, outs: int,
     # Remaining runs from future innings (normal approximation)
     # Each half-inning: mean = rpg/18, std = sqrt(rpg/18 * variance_factor)
     runs_per_half = rpg / 18.0
-    variance_factor = 1.3  # empirical variance adjustment
+    variance_factor = 3.66  # Optuna-optimized (was 1.3)
 
     # Total remaining half-innings for each team
     if top_bottom == "top":
@@ -161,10 +161,10 @@ def calculate_wp(inning: int, top_bottom: str, outs: int,
             # Use RE24 as expected runs; P(score >= 1) from Poisson-like model
             # With bases loaded 2 out RE=0.752, P(score>=1) is high
             # Empirical: P(scoring >= 1 run) ≈ 1 - e^(-RE * scoring_factor)
-            scoring_factor = 1.8  # calibrated to match historical WP tables
+            scoring_factor = 0.87  # Optuna-optimized (was 1.8)
             p_score_1 = 1.0 - np.exp(-re * scoring_factor)
             # Home also has advantage of extra innings if they don't score
-            p_extras_win = 0.50  # roughly 50/50 in extras
+            p_extras_win = 0.41  # Optuna-optimized (was 0.50)
             wp = p_score_1 + (1 - p_score_1) * p_extras_win
             return min(0.99, max(0.01, wp))
         else:
@@ -172,7 +172,7 @@ def calculate_wp(inning: int, top_bottom: str, outs: int,
             needed = abs(score_diff)
             # P(scoring >= needed runs) from current RE + Poisson approximation
             # More aggressive lambda for loaded bases situations
-            lam = re * 1.5
+            lam = re * 0.45  # Optuna-optimized behind_lambda_mult (was 1.5)
             # Poisson CDF: P(X >= needed)
             from scipy.stats import poisson
             p_enough = 1.0 - poisson.cdf(needed - 1, lam)
@@ -184,7 +184,7 @@ def calculate_wp(inning: int, top_bottom: str, outs: int,
         if score_diff > 0:
             # Home leading, visitor batting in 9th+
             # P(visitor ties or takes lead) based on current RE
-            lam = re * 1.3
+            lam = re * 0.67  # Optuna-optimized top9_lambda_mult (was 1.3)
             from scipy.stats import poisson
             p_tie_or_lead = 1.0 - poisson.cdf(score_diff - 1, lam)
             p_lead = 1.0 - poisson.cdf(score_diff, lam)
