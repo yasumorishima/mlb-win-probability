@@ -158,15 +158,15 @@ gh workflow run "Validate WP Model" \
 
 ### パラメータ最適化
 
-現在のモデルには以下のパラメータがあり、Optuna（TPE sampler）で最適値を探索：
+Optuna（TPE sampler, 500 trial）で 2024 シーズン全打席データに対して最適化済み。Brier Score **+3.85%** 改善（0.1651 → 0.1587）。
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `variance_factor` | 残りイニングの得点分布の分散係数 | 1.3 |
-| `scoring_factor` | 9回裏同点時のサヨナラ確率スケーリング | 1.8 |
-| `behind_lambda_mult` | 9回裏ビハインド時のPoisson λ倍率 | 1.5 |
-| `top9_lambda_mult` | 9回表ホームリード時のPoisson λ倍率 | 1.3 |
-| `extras_win_prob` | 延長戦突入時のホーム勝率 | 0.50 |
+| Parameter | Description | Value |
+|-----------|-------------|-------|
+| `variance_factor` | 残りイニングの得点分布の分散係数 | 3.66 |
+| `scoring_factor` | 9回裏同点時のサヨナラ確率スケーリング | 0.87 |
+| `behind_lambda_mult` | 9回裏ビハインド時のPoisson λ倍率 | 0.45 |
+| `top9_lambda_mult` | 9回表ホームリード時のPoisson λ倍率 | 0.67 |
+| `extras_win_prob` | 延長戦突入時のホーム勝率 | 0.41 |
 
 ## Scoring Environment（得点環境の調整）
 
