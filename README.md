@@ -191,9 +191,18 @@ Used for WP model validation and training. Each row represents a game state at a
 | MLB | 4.5 | `runs_per_game=4.5` (default) |
 | NPB | 4.0 | `runs_per_game=4.0` |
 
+### Cloud Run API
+
+| 項目 | 値 |
+|---|---|
+| URL | https://mlb-win-probability-api-mjlswxn7bq-uc.a.run.app |
+| Swagger UI | https://mlb-win-probability-api-mjlswxn7bq-uc.a.run.app/docs |
+| Artifact Registry | `us-central1-docker.pkg.dev/data-platform-490901/apis/mlb-win-probability-api` |
+| メモリ | 256Mi（ステートレスなMarkov Chain計算、MLモデルなし） |
+
 ## Planned
 
-- [ ] Cloud Run API — RPi5 FastAPI を GCP Cloud Run に移行（サーバーレス化、RPi5 電源依存の解消）
+- [x] Cloud Run API — RPi5 FastAPI を GCP Cloud Run に移行（サーバーレス化、RPi5 電源依存の解消）
 - [ ] BQML モデル — BigQuery 上の play_states データで SQL だけの WP モデルを構築
 
 ## License
