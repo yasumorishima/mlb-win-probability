@@ -191,6 +191,11 @@ Used for WP model validation and training. Each row represents a game state at a
 | MLB | 4.5 | `runs_per_game=4.5` (default) |
 | NPB | 4.0 | `runs_per_game=4.0` |
 
+## Planned
+
+- [ ] Cloud Run API — RPi5 FastAPI を GCP Cloud Run に移行（サーバーレス化、RPi5 電源依存の解消）
+- [ ] BQML モデル — BigQuery 上の play_states データで SQL だけの WP モデルを構築
+
 ## License
 
 MIT
