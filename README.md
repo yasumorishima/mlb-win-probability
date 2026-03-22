@@ -2,16 +2,20 @@
 
 イニング・アウト・走者・点差を入力すると、**ホーム勝率・局面の重要度・戦術提案**をリアルタイムで返すエンジン。
 
-**[Live Demo](https://mlb-wp-engine.streamlit.app/)** | English / 日本語 | MLB / NPB 対応
+**[Live Demo](https://mlb-wp-engine.streamlit.app/)** | English / 日本語
 
 ---
 
-**計算の仕組み（3層構造）：**
-1. **RE24** — 24通りの走者×アウト状況ごとに「この回に何点取れるか」の期待値テーブル
-2. **Markov Chain** — 打席ごとの状態遷移（三振/単打/本塁打…）を確率モデルで繋ぎ、得点分布を推定
-3. **Normal approximation** — 残りイニングの得点分布から最終的な勝率を計算
+**3 エンジン + アンサンブル構成：**
 
-外部データ不要・純粋な数理モデルのため MLB / NPB どちらでも動作します。
+| Engine | Approach |
+|--------|----------|
+| **v1** | RE24 + Markov Chain + Normal 近似（Optuna 最適化済み） |
+| **v2** | 10 年分 MLB 実データの経験的 WP テーブル + Markov Chain フォールバック |
+| **LightGBM** | 勾配ブースティング（11 特徴量、367K play states で学習） |
+
+3 エンジンを **inverse-Brier 加重アンサンブル** + **Isotonic Regression キャリブレーション**で統合。
+学習・検証データは全て BigQuery（`data-platform-490901.mlb_wp.play_states`）から取得。
 
 ## Features
 
@@ -117,8 +121,6 @@ curl "http://localhost:8000/wp/play?before_inning=9&before_top_bottom=bottom&bef
 # MLB environment (default)
 curl "http://localhost:8000/re24"
 
-# NPB environment
-curl "http://localhost:8000/re24?runs_per_game=4.0"
 ```
 
 ### `GET /wp/scenario` — Preset Scenarios
@@ -138,7 +140,12 @@ Available scenarios: `ninth_inning_drama`, `game_start`, `rally_7th`, `tied_8th`
 
 ### Win Probability
 
-Uses remaining innings and scoring rate to estimate run distributions via normal approximation. Late-inning states (9th inning) use specialized calculations to handle walk-off and save situations.
+3 エンジン構成（詳細は [Model Validation](#model-validation精度検証) セクション参照）:
+- **v1**: Normal 近似 + Optuna 最適化（5 パラメータ）
+- **v2**: 実データ WP テーブル（10 年分）+ Markov Chain フォールバック
+- **LightGBM**: 勾配ブースティング（11 特徴量）
+
+アンサンブルで統合し、Isotonic Regression でキャリブレーション補正。
 
 ### Leverage Index
 
@@ -324,15 +331,6 @@ gh workflow run "Validate WP Model" \
   -f season=2024 -f optimize=true -f n_trials=500
 ```
 
-## Scoring Environment（得点環境の調整）
-
-得点の多い/少ないリーグでは勝率の変動幅も変わります。`runs_per_game` パラメータで切り替え可能。
-
-| League | Runs/Game | Parameter |
-|--------|-----------|-----------|
-| MLB | 4.5 | `runs_per_game=4.5` (default) |
-| NPB | 4.0 | `runs_per_game=4.0` |
-
 ### Cloud Run API
 
 | 項目 | 値 |
@@ -340,7 +338,7 @@ gh workflow run "Validate WP Model" \
 | URL | デプロイ済み（認証付き） |
 | Swagger UI | ローカル起動: `http://localhost:8001/docs` |
 | Artifact Registry | `us-central1-docker.pkg.dev/data-platform-490901/apis/mlb-win-probability-api` |
-| メモリ | 256Mi（ステートレスなMarkov Chain計算、MLモデルなし） |
+| メモリ | 256Mi |
 
 ## Planned
 
