@@ -231,64 +231,98 @@ export WANDB_API_KEY="your-wandb-key"
 
 ## Model Validation（精度検証）
 
-GitHub Actions で 2024 シーズン全試合（~2,430 試合・~170,000 打席）の play-by-play データを取得し、自作 WP モデルの精度を定量検証しています。
+367K+ play states（2015–2024、10シーズン）を使って 3 つの WP エンジンを定量検証し、最良のアンサンブルを構築しています。
+
+### データ基盤
+
+全データは **BigQuery**（`data-platform-490901.mlb_wp.play_states`）に格納。学習・検証パイプラインは BQ から直接エクスポートして実行（MLB Stats API はフォールバック用）。
+
+| Item | Value |
+|------|-------|
+| Project | `data-platform-490901` |
+| Dataset / Table | `mlb_wp.play_states` |
+| Rows | 367,564（2015–2024 全試合） |
+| Cost | Free tier |
+
+### 3 エンジン構成
+
+| Engine | Approach | 特徴 |
+|--------|----------|------|
+| **v1 (Normal)** | Markov Chain + Normal 近似 + Optuna 最適化 | 5 パラメータ、数式ベース |
+| **v2 (Empirical)** | 実データ WP テーブル + Markov Chain フォールバック | 10 年分の経験的確率、未知状態は Markov で補完 |
+| **LightGBM** | 勾配ブースティング（11 特徴量） | ML ベース、非線形パターンを捕捉 |
+
+### アンサンブル（inverse-Brier 加重）
+
+[baseball-mlops](https://github.com/yasumorishima/baseball-mlops) の 5 モデルアンサンブルと同じ設計思想：
+
+```
+weight_i = 1 / brier_score_i
+ensemble_pred = Σ(w_i × pred_i) / Σ(w_i)
+```
+
+さらに **Isotonic Regression** でキャリブレーション補正し、ECE（Expected Calibration Error）を削減。
 
 ### 検証パイプライン
 
 ```
-MLB Stats API → play-by-play CSV → WP算出 → 実際の勝敗と比較
-                                  ↓
-                          RE24再計算（実データ vs ハードコード値）
-                                  ↓
-                          Optuna 500trial パラメータ最適化
+BigQuery (play_states)
+    ↓ export_from_bq.py（秒単位で完了）
+data/play_states_{year}.csv
+    ↓
+┌─────────────────────────────────────────────────┐
+│  v1 Normal    → Brier Score                     │
+│  v2 Empirical → Brier Score                     │
+│  LightGBM     → Brier Score                     │
+│       ↓                                          │
+│  Ensemble (inverse-Brier weighted)               │
+│       ↓                                          │
+│  Isotonic Regression Calibration                 │
+│       ↓                                          │
+│  Leave-one-year-out CV (2015–2024)              │
+└─────────────────────────────────────────────────┘
+    ↓
+results/ (JSON + calibrator.pkl)
+    ↓
+W&B + Discord notification
 ```
 
 ### メトリクス
 
 | Metric | Description |
 |--------|-------------|
-| Brier Score | 確率予測の代表的評価指標。mean((predicted - actual)^2)、低いほど良い |
+| Brier Score | 確率予測の代表的評価指標。mean((predicted - actual)²)、低いほど良い |
 | Brier Skill Score | 常に 50% と予測するベースラインとの比較。正なら改善 |
-| ECE (Expected Calibration Error) | 予測値と実際の勝率のズレ。0 に近いほど校正が正確 |
+| ECE | 予測値と実際の勝率のズレ。0 に近いほど校正が正確 |
 | Log Loss | 確信度の高い誤予測を重く罰するスコアリングルール |
-| MAE by Inning | イニング別の平均絶対誤差。終盤の精度を個別に評価 |
 
-### 検証ワークフロー
+### v1 Optuna 最適化
 
-```bash
-gh workflow run "Validate WP Model" \
-  --repo yasumorishima/mlb-win-probability \
-  -f memo="2024 full season validation" \
-  -f season=2024 \
-  -f optimize=true \
-  -f n_trials=500
-```
-
-### パラメータ最適化
-
-Optuna（TPE sampler, 500 trial）で 2024 シーズン全打席データに対して最適化済み。Brier Score **+3.85%** 改善（0.1651 → 0.1587）。
+Optuna（TPE sampler, 500 trial）で Brier Score **+3.85%** 改善（0.1651 → 0.1587）。
 
 | Parameter | Description | Value |
 |-----------|-------------|-------|
-| `variance_factor` | 残りイニングの得点分布の分散係数 | 3.66 |
-| `scoring_factor` | 9回裏同点時のサヨナラ確率スケーリング | 0.87 |
-| `behind_lambda_mult` | 9回裏ビハインド時のPoisson λ倍率 | 0.45 |
-| `top9_lambda_mult` | 9回表ホームリード時のPoisson λ倍率 | 0.67 |
-| `extras_win_prob` | 延長戦突入時のホーム勝率 | 0.41 |
+| `variance_factor` | 得点分布の分散係数 | 3.66 |
+| `scoring_factor` | 9 回裏同点時のサヨナラ確率 | 0.87 |
+| `behind_lambda_mult` | 9 回裏ビハインド時 Poisson λ倍率 | 0.45 |
+| `top9_lambda_mult` | 9 回表ホームリード時 Poisson λ倍率 | 0.67 |
+| `extras_win_prob` | 延長戦ホーム勝率 | 0.41 |
 
-## BigQuery Data
+### ワークフロー
 
-Play-by-play game state data is available on Google BigQuery for analysis and model training.
+```bash
+# 3エンジン比較 + アンサンブル + 年次CV（BQから自動データ取得）
+gh workflow run "Build WP v2" \
+  --repo yasumorishima/mlb-win-probability \
+  -f memo="ensemble + calibration + CV" \
+  -f step=wp_v2_full
 
-| Item | Value |
-|------|-------|
-| Project | `data-platform-490901` |
-| Dataset | `mlb_wp` |
-| Table | `play_states` (367,564 rows) |
-| Coverage | 2015–2024 MLB seasons (10 years) |
-| Cost | Free tier (no charge) |
-
-Used for WP model validation and training. Each row represents a game state at a given play, including inning, outs, runners, score differential, and actual game outcome.
+# v1 単体の Optuna 最適化
+gh workflow run "Validate WP Model" \
+  --repo yasumorishima/mlb-win-probability \
+  -f memo="2024 full season" \
+  -f season=2024 -f optimize=true -f n_trials=500
+```
 
 ## Scoring Environment（得点環境の調整）
 
@@ -313,16 +347,21 @@ Used for WP model validation and training. Each row represents a game state at a
 ### Done
 - [x] Cloud Run API — RPi5 FastAPI を GCP Cloud Run に移行（サーバーレス化）
 - [x] AI Commentary — Gemini 2.5 Flash による状況解説生成（プロンプトバージョニング + 品質自動評価 + W&B 追跡）
+- [x] BigQuery データ基盤 — 367K+ play states を BQ に格納、BQ エクスポートで高速データ取得
+- [x] 3 エンジン比較パイプライン — v1/v2/LightGBM の Brier Score 自動比較
+- [x] アンサンブル + キャリブレーション — inverse-Brier 加重 + Isotonic Regression
+- [x] Leave-one-year-out CV — 2015–2024 の年次安定性検証
 
 ### In Progress
-- [ ] Gemini API キー設定 + Streamlit Cloud デプロイ — 実際の解説生成をライブで動作確認
-- [ ] Cloud Run に `/wp/commentary` デプロイ — サーバーレス API としての解説生成
+- [ ] 3 エンジン精度比較結果の確認 → 最良構成を本番 WP エンジンに反映
+- [ ] Gemini API キー設定 + Streamlit Cloud デプロイ
 
 ### Next
-- [ ] BQML モデル — BigQuery 上の play_states データで SQL だけの WP モデルを構築
+- [ ] BQML モデル — BigQuery 上で SQL だけの WP モデルを構築（4 番目のエンジン候補）
+- [ ] 本番エンジン切り替え — アンサンブル or 最良単体エンジンを `calculate_wp()` に統合
+- [ ] Cloud Run 再デプロイ — アンサンブルエンジン + AI Commentary を含む最新版
 - [ ] プロンプト v3 改善 — v2 の品質スコア分析結果を基にプロンプトを反復改善
-- [ ] W&B Dashboard — 品質スコア・レイテンシ・トークン消費量の時系列可視化
-- [ ] NPB 解説モード — `runs_per_game=4.0` 時に NPB 文脈の解説を生成（犠打重視、投手交代タイミング等）
+- [ ] NPB 解説モード — `runs_per_game=4.0` 時に NPB 文脈の解説を生成
 
 ## License
 
