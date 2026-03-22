@@ -47,6 +47,12 @@ docker compose up --build
 streamlit run streamlit_app.py
 ```
 
+## Grafana Dashboard
+
+[MLB Win Probability](https://yasumorishima.grafana.net/d/a6055169-5c50-4943-920a-b622330f93b0) — Situation-based win expectancy analysis from 367K+ play states (2015–2024). Connected to BigQuery `data-platform-490901.mlb_wp`.
+
+![MLB Win Probability — Grafana Dashboard](docs/images/grafana-preview.png)
+
 ## API Endpoints
 
 ### `GET /wp` — Win Probability + LI + Tactics
