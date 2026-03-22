@@ -49,7 +49,7 @@ streamlit run streamlit_app.py
 
 ## Grafana Dashboard
 
-[MLB Win Probability](https://yasumorishima.grafana.net/d/a6055169-5c50-4943-920a-b622330f93b0) — Situation-based win expectancy analysis from 367K+ play states (2015–2024). Connected to BigQuery `data-platform-490901.mlb_wp`.
+[MLB Win Probability](https://yasumorishima.grafana.net/public-dashboards/8cf85d216d6e47068c3dcc7e807ac337) — Situation-based win expectancy analysis from 367K+ play states (2015–2024). Connected to BigQuery `data-platform-490901.mlb_wp`.
 
 ![MLB Win Probability — Grafana Dashboard](docs/images/grafana-preview.png)
 
