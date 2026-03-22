@@ -240,24 +240,26 @@ export WANDB_API_KEY="your-wandb-key"
 
 367K+ play states（2015–2024、10シーズン）を使って 3 つの WP エンジンを定量検証し、最良のアンサンブルを構築しています。
 
-### データ基盤
+### データ基盤（BigQuery）
 
-全データは **BigQuery**（`data-platform-490901.mlb_wp.play_states`）に格納。学習・検証パイプラインは BQ から直接エクスポートして実行（MLB Stats API はフォールバック用）。
+全データは **BigQuery** に格納。学習・検証パイプラインは BQ から直接取得。
 
-| Item | Value |
-|------|-------|
-| Project | `data-platform-490901` |
-| Dataset / Table | `mlb_wp.play_states` |
-| Rows | 367,564（2015–2024 全試合） |
-| Cost | Free tier |
+| Table | Rows | Description |
+|-------|------|-------------|
+| `mlb_wp.play_states` | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗） |
+| `mlb_wp.statcast_pitches` | 6,838,542 | **Statcast 全投球データ**（2015–2024、pybaseball 経由で取得） |
+| `mlb_statcast.raw_park_factors` | 329 | 球場パークファクター（savant-extras） |
 
-### 3 エンジン構成
+Statcast データには投球速度・変化量・打球速度・発射角度・xwOBA・MLB 公式 WP 等 70+ 列を含む。WP モデル学習時は**打席結果のみ（`events IS NOT NULL`）**に絞り、約 172 万行で学習。
+
+### エンジン構成
 
 | Engine | Approach | 特徴 |
 |--------|----------|------|
 | **v1 (Normal)** | Markov Chain + Normal 近似 + Optuna 最適化 | 5 パラメータ、数式ベース |
 | **v2 (Empirical)** | 実データ WP テーブル + Markov Chain フォールバック | 10 年分の経験的確率、未知状態は Markov で補完 |
-| **LightGBM** | 勾配ブースティング（11 特徴量） | ML ベース、非線形パターンを捕捉 |
+| **LightGBM (state)** | 勾配ブースティング（25 特徴量、ゲーム状態のみ） | 状態変数ベースの ML |
+| **LightGBM (Statcast)** | 勾配ブースティング（53 特徴量、Optuna 最適化） | **Statcast 打球・投球データ活用、MLB 公式 WP をベンチマーク** |
 
 ### アンサンブル（inverse-Brier 加重）
 
@@ -273,20 +275,22 @@ ensemble_pred = Σ(w_i × pred_i) / Σ(w_i)
 ### 検証パイプライン
 
 ```
-BigQuery (play_states)
-    ↓ export_from_bq.py（秒単位で完了）
-data/play_states_{year}.csv
-    ↓
-┌─────────────────────────────────────────────────┐
-│  v1 Normal    → Brier Score                     │
-│  v2 Empirical → Brier Score                     │
-│  LightGBM     → Brier Score                     │
-│       ↓                                          │
-│  Ensemble (inverse-Brier weighted)               │
-│       ↓                                          │
-│  Isotonic Regression Calibration                 │
-│       ↓                                          │
-│  Leave-one-year-out CV (2015–2024)              │
+BigQuery
+├── mlb_wp.play_states (367K)     ── state-based engines ─┐
+│     ↓ export_from_bq.py                                 │
+│   v1 Normal / v2 Empirical / LightGBM(state)            │
+│     ↓                                                    │
+│   Ensemble (inverse-Brier weighted)                     ├→ 本番WP
+│     ↓                                                    │
+│   Leave-one-year-out CV (2015–2024)                     │
+│                                                          │
+├── mlb_wp.statcast_pitches (6.8M) ── Statcast engine ───┘
+│     ↓ train_wp_statcast.py
+│   LightGBM(Statcast, 53 features, Optuna)
+│     ↓
+│   Benchmark: MLB official home_win_exp
+│     ↓
+│   Park factors (mlb_statcast.raw_park_factors)
 └─────────────────────────────────────────────────┘
     ↓
 results/ (JSON + calibrator.pkl)
@@ -349,15 +353,21 @@ gh workflow run "Validate WP Model" \
 - [x] Cloud Run API デプロイ（認証付き、Artifact Registry）
 - [x] Grafana ダッシュボード（BQ 接続、公開）
 
-### Phase 2: 精度追い込み 🔄（現在）
+### Phase 2a: State-based 精度追い込み ✅
 - [x] v2 エンジン構築（10 年分実データ WP テーブル + Markov Chain フォールバック）
-- [x] LightGBM エンジン構築（11 特徴量、時系列 holdout 分割）
-- [x] 3 エンジン比較パイプライン（GitHub Actions、BQ → CSV → 自動比較）
-- [x] アンサンブル実装（inverse-Brier 加重、baseball-mlops 同設計）
+- [x] LightGBM(state) エンジン構築（25 特徴量、Optuna 最適化）
+- [x] 3 エンジン比較パイプライン（GitHub Actions、BQ → 自動比較）
+- [x] アンサンブル実装（inverse-Brier 加重、+1.14% vs v1 単体）
 - [x] Isotonic Regression キャリブレーション補正
-- [x] Leave-one-year-out CV（2015–2024、年次安定性検証）
-- [ ] **比較結果確認 → 最良構成を本番 `calculate_wp()` に反映**
-- [ ] **BQML モデル — BigQuery SQL だけで WP モデルを構築（4 番目のエンジン候補）**
+- [x] Leave-one-year-out CV（2015–2024、全 10 年で一貫して改善）
+
+### Phase 2b: Statcast 精度追い込み 🔄（現在）
+- [x] Statcast 全投球データ BQ ロード（6,838,542 行、pybaseball → BQ）
+- [x] 53 特徴量エンジニアリング（投球・打球・バットトラッキング・RE24・パークファクター）
+- [x] GitHub Actions ワークフロー（`Train Statcast WP Model`）
+- [ ] **LightGBM Optuna 50 trial 結果待ち**（Run 23411598107 実行中、MLB 公式 WP ベンチマーク）
+- [ ] CatBoost 追加 → Statcast アンサンブル
+- [ ] 本番エンジン統合（最良構成を `calculate_wp()` に反映）
 
 ### Phase 3: AI Commentary 🔄（現在）
 - [x] Gemini 2.5 Flash 解説生成（`/wp/commentary` エンドポイント）
