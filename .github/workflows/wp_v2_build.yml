@@ -105,6 +105,21 @@ jobs:
             --data-dir data/ \
             --output-dir results/
 
+      - name: Ensemble + Calibration (single holdout)
+        if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        run: |
+          python scripts/ensemble_wp.py \
+            --data-dir data/ \
+            --output-dir results/
+
+      - name: Leave-one-year-out cross-validation
+        if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        run: |
+          python scripts/ensemble_wp.py \
+            --data-dir data/ \
+            --output-dir results/ \
+            --cross-validate
+
       - name: Commit derived files
         run: |
           git config user.name "github-actions[bot]"
@@ -134,6 +149,8 @@ jobs:
             data/empirical_wp_table.json
             data/halfinn_run_dist.json
             data/wp_lgbm_metrics.json
+            data/ensemble_weights.json
+            data/calibrator.pkl
           retention-days: 90
 
       - name: Job summary
@@ -172,6 +189,38 @@ jobs:
           print('|---------|------|')
           for name, gain in sorted(m['feature_importance'].items(), key=lambda x: -x[1]):
               print(f'| {name} | {gain:.1f} |')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f results/ensemble_weights.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Ensemble + Calibration" >> $GITHUB_STEP_SUMMARY
+            python -c "
+          import json
+          e = json.load(open('results/ensemble_weights.json'))
+          print(f'| Component | Value |')
+          print(f'|-----------|-------|')
+          for name, w in e['weights'].items():
+              print(f'| {name} weight | {w:.4f} |')
+          print(f'| Ensemble Brier | {e[\"ensemble_brier\"]:.6f} |')
+          print(f'| Ensemble ECE | {e[\"ensemble_ece\"]:.4f} |')
+          print(f'| Calibrated Brier | {e[\"calibrated_brier\"]:.6f} |')
+          print(f'| Calibrated ECE | {e[\"calibrated_ece\"]:.4f} |')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+          if [ -f results/ensemble_cv_results.json ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### Cross-Validation (Leave-One-Year-Out)" >> $GITHUB_STEP_SUMMARY
+            python -c "
+          import json
+          cv = json.load(open('results/ensemble_cv_results.json'))
+          print('| Year | v1 Brier | Ensemble | Calibrated |')
+          print('|------|----------|----------|------------|')
+          for r in cv['results']:
+              print(f'| {r[\"year\"]} | {r[\"engines\"][\"v1\"]:.6f} | {r[\"ensemble_brier\"]:.6f} | {r[\"calibrated_brier\"]:.6f} |')
+          print(f'| **Mean** | **{cv[\"mean_v1_brier\"]:.6f}** | **{cv[\"mean_ensemble_brier\"]:.6f}** | **{cv[\"mean_calibrated_brier\"]:.6f}** |')
+          print()
+          print(f'Ensemble vs v1: **{cv[\"improvement_ensemble_pct\"]:+.2f}%**')
+          print(f'Calibrated vs v1: **{cv[\"improvement_calibrated_pct\"]:+.2f}%**')
           " >> $GITHUB_STEP_SUMMARY
           fi
 
