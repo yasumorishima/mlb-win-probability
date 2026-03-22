@@ -1,0 +1,130 @@
+name: Train Statcast WP Model
+
+on:
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: 'Purpose of this run'
+        required: true
+        type: string
+      n_trials:
+        description: 'Optuna trials for LightGBM'
+        required: false
+        default: '50'
+      test_year:
+        description: 'Holdout test year'
+        required: false
+        default: '2024'
+
+jobs:
+  train:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install lightgbm optuna google-cloud-bigquery pandas numpy pyarrow db-dtypes
+
+      - name: Authenticate GCP
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json" >> $GITHUB_ENV
+
+      - name: Train Statcast WP model
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+        run: |
+          python scripts/train_wp_statcast.py \
+            --output-dir results/ \
+            --test-year ${{ inputs.test_year }} \
+            --n-trials ${{ inputs.n_trials }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: statcast-wp-results
+          path: |
+            results/
+          retention-days: 90
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## Statcast WP Model Results" >> $GITHUB_STEP_SUMMARY
+          echo "**Memo**: ${{ inputs.memo }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Optuna trials**: ${{ inputs.n_trials }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f results/wp_statcast_results.json ]; then
+            python -c "
+          import json
+          r = json.load(open('results/wp_statcast_results.json'))
+          mlb = r.get('mlb_official', {}).get('brier', 'N/A')
+          lgbm = r['lgbm']['brier']
+          bss = r['lgbm']['brier_skill']
+          ece = r['lgbm']['ece']
+          nf = r['n_features']
+          print(f'| Metric | Value |')
+          print(f'|--------|-------|')
+          print(f'| MLB Official Brier | {mlb} |')
+          print(f'| LightGBM Brier | {lgbm} |')
+          print(f'| Brier Skill Score | {bss} |')
+          print(f'| ECE | {ece} |')
+          print(f'| Features | {nf} |')
+          print(f'| Optuna trials | {r[\"lgbm\"][\"optuna_trials\"]} |')
+          print(f'| Best iteration | {r[\"lgbm\"][\"best_iteration\"]} |')
+          if isinstance(mlb, float):
+              vs = (mlb - lgbm) / mlb * 100
+              print(f'| **vs MLB** | **{vs:+.2f}%** |')
+          print()
+          print('### Top 15 Features')
+          print('| Feature | Gain |')
+          print('|---------|------|')
+          fi = r['lgbm'].get('feature_importance', {})
+          for n, v in sorted(fi.items(), key=lambda x: -x[1])[:15]:
+              print(f'| {n} | {v:.1f} |')
+          " >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Discord notification
+        if: always()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DISCORD_WEBHOOK_URL" ]; then exit 0; fi
+          STATUS="${{ job.status }}"
+          RUN_URL="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+
+          if [ "$STATUS" = "success" ] && [ -f results/wp_statcast_results.json ]; then
+            METRICS=$(python -c "
+          import json
+          r = json.load(open('results/wp_statcast_results.json'))
+          mlb = r.get('mlb_official', {}).get('brier', 0)
+          lgbm = r['lgbm']['brier']
+          if mlb > 0:
+              vs = (mlb - lgbm) / mlb * 100
+              print(f'MLB: {mlb:.6f} | LGBM: {lgbm:.6f} ({vs:+.2f}%)')
+          else:
+              print(f'LGBM Brier: {lgbm:.6f}')
+          print(f'{r[\"n_features\"]} features, {r[\"lgbm\"][\"optuna_trials\"]} trials')
+          fi = r['lgbm'].get('feature_importance', {})
+          top = sorted(fi.items(), key=lambda x: -x[1])[:3]
+          print(f'Top: {\" / \".join(n for n,_ in top)}')
+          ")
+            BODY="**Statcast WP Model** ✅\n${METRICS}\n${RUN_URL}"
+          else
+            BODY="**Statcast WP Model** ❌ ${STATUS}\n${{ inputs.memo }}\n${RUN_URL}"
+          fi
+
+          curl -s -H "Content-Type: application/json" \
+            -d "{\"content\": \"$(echo -e "$BODY")\"}" \
+            "$DISCORD_WEBHOOK_URL"

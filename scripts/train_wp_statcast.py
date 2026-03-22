@@ -34,10 +34,8 @@ DATASET = "mlb_wp"
 TABLE = "statcast_pitches"
 
 
-def load_from_bq(test_year: int = 2024) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Load Statcast data from BigQuery, split by year."""
-    from google.cloud import bigquery
-
+def get_bq_client():
+    """Get authenticated BQ client."""
     sa_key = os.environ.get("GCP_SA_KEY")
     if sa_key and not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
         key_path = Path("/tmp/gcp-sa-key.json")
@@ -46,18 +44,37 @@ def load_from_bq(test_year: int = 2024) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     cred_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
     if not cred_path:
-        # Try local default
         local_key = Path(r"C:\Users\fw_ya\.claude\gcp-sa-key.json")
         if local_key.exists():
             os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(local_key)
 
-    client = bigquery.Client(project=PROJECT)
+    return bigquery.Client(project=PROJECT)
 
+
+def load_from_bq(test_year: int = 2024) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Load Statcast data from BigQuery, split by year."""
+    client = get_bq_client()
+
+    # At-bat outcomes only (events IS NOT NULL) to reduce memory
     query = f"""
-        SELECT *
+        SELECT
+            game_pk, game_year, home_team,
+            inning, inning_topbot, outs_when_up, balls, strikes,
+            on_1b, on_2b, on_3b,
+            home_score, away_score, score_diff, is_bottom,
+            post_home_score, post_away_score,
+            release_speed, effective_speed, pfx_x, pfx_z,
+            plate_x, plate_z, release_spin_rate, release_extension,
+            launch_speed, launch_angle, hit_distance_sc,
+            estimated_woba_using_speedangle, estimated_ba_using_speedangle,
+            woba_value, bb_type, zone,
+            bat_speed, swing_length,
+            n_thruorder_pitcher, n_priorpa_thisgame_player_at_bat,
+            home_win_exp, delta_home_win_exp,
+            events, type
         FROM `{PROJECT}.{DATASET}.{TABLE}`
-        WHERE game_type = 'R'
-        ORDER BY game_pk, at_bat_number, pitch_number
+        WHERE game_type = 'R' AND events IS NOT NULL
+        ORDER BY game_pk, inning, is_bottom, outs_when_up
     """
 
     print("Loading from BigQuery...")
@@ -247,16 +264,22 @@ def main():
     # Load data
     train_df, test_df = load_from_bq(args.test_year)
 
-    # Merge park factors (savant-extras data already in BQ)
+    # Merge park factors from BQ (savant-extras data already loaded there)
     print("\nLoading park factors...")
     try:
-        from savant_extras import park_factors_range
-        pf = park_factors_range(2015, args.test_year)
-        pf = pf.rename(columns={"team": "home_team", "season": "game_year"})
-        pf = pf[["home_team", "game_year", "pf_5yr", "pf_hr"]].copy()
-        train_df = train_df.merge(pf, on=["home_team", "game_year"], how="left")
-        test_df = test_df.merge(pf, on=["home_team", "game_year"], how="left")
-        print(f"  Merged park factors ({len(pf)} team-seasons)")
+        bq_client = get_bq_client()
+        pf_query = f"""
+            SELECT CAST(season AS FLOAT64) AS game_year, team AS home_team,
+                   pf_5yr, pf_hr
+            FROM `{PROJECT}.mlb_statcast.raw_park_factors`
+        """
+        pf = bq_client.query(pf_query).to_dataframe()
+        if len(pf) > 0:
+            train_df = train_df.merge(pf, on=["home_team", "game_year"], how="left")
+            test_df = test_df.merge(pf, on=["home_team", "game_year"], how="left")
+            print(f"  Merged park factors from BQ ({len(pf)} team-seasons)")
+        else:
+            print("  No park factors in BQ")
     except Exception as e:
         print(f"  Park factors not available: {e}")
 
