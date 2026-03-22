@@ -46,8 +46,19 @@ jobs:
           path: data/play_states_*.csv
           key: play-states-2015-2024-v3
 
-      - name: Fetch historical play-by-play (2015-2024)
+      - name: Export from BigQuery (fast path)
         if: inputs.step == 'fetch_historical' || inputs.step == 'wp_v2_full'
+        id: bq_export
+        continue-on-error: true
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          pip install google-cloud-bigquery --quiet
+          mkdir -p data
+          python scripts/export_from_bq.py --output-dir data/
+
+      - name: Fetch from MLB Stats API (fallback)
+        if: (inputs.step == 'fetch_historical' || inputs.step == 'wp_v2_full') && steps.bq_export.outcome == 'failure'
         run: |
           mkdir -p data
           for year in $(seq 2015 2024); do
@@ -63,7 +74,10 @@ jobs:
               --end-date ${year}-10-10 \
               --delay 0.3
           done
-          echo ""
+
+      - name: Data summary
+        if: inputs.step == 'fetch_historical' || inputs.step == 'wp_v2_full'
+        run: |
           echo "=== Summary ==="
           total=0
           for f in data/play_states_*.csv; do
