@@ -195,8 +195,8 @@ Used for WP model validation and training. Each row represents a game state at a
 
 | 項目 | 値 |
 |---|---|
-| URL | https://mlb-win-probability-api-mjlswxn7bq-uc.a.run.app |
-| Swagger UI | https://mlb-win-probability-api-mjlswxn7bq-uc.a.run.app/docs |
+| URL | デプロイ済み（認証付き） |
+| Swagger UI | ローカル起動: `http://localhost:8001/docs` |
 | Artifact Registry | `us-central1-docker.pkg.dev/data-platform-490901/apis/mlb-win-probability-api` |
 | メモリ | 256Mi（ステートレスなMarkov Chain計算、MLモデルなし） |
 
