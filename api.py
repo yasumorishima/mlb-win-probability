@@ -23,6 +23,11 @@ from win_probability import (
     li_label,
 )
 from live_feed import get_todays_games, get_live_state, get_live_wp
+from gemini_commentary import (
+    generate_commentary,
+    evaluate_commentary_quality,
+    get_commentary_metadata,
+)
 
 app = FastAPI(
     title="MLB Win Probability API",
@@ -48,6 +53,11 @@ app.add_middleware(
 )
 
 
+class Lang(str, Enum):
+    ja = "JA"
+    en = "EN"
+
+
 class TopBottom(str, Enum):
     top = "top"
     bottom = "bottom"
@@ -69,6 +79,8 @@ def root():
         "version": "0.2.0",
         "endpoints": [
             "/wp",
+            "/wp/commentary",
+            "/commentary/info",
             "/wp/play",
             "/re24",
             "/wp/scenario",
@@ -105,6 +117,66 @@ def get_wp(
         runs_per_game, batter_ops, pitcher_era,
     )
     return result
+
+
+@app.get(
+    "/wp/commentary",
+    summary="AI Commentary (Gemini 2.5 Flash)",
+    description=(
+        "Generate natural language game situation commentary using Gemini API. "
+        "Gemini 2.5 Flash + Cloud Run architecture for real-time game analysis.\n\n"
+        "Requires `GEMINI_API_KEY` environment variable."
+    ),
+)
+def get_commentary(
+    inning: int = Query(ge=1, le=15, description="Current inning (1-15)"),
+    top_bottom: TopBottom = Query(description="Top or bottom of inning"),
+    outs: int = Query(ge=0, le=2, description="Number of outs (0-2)"),
+    runner1: int = Query(default=0, ge=0, le=1, description="Runner on 1st base (0 or 1)"),
+    runner2: int = Query(default=0, ge=0, le=1, description="Runner on 2nd base (0 or 1)"),
+    runner3: int = Query(default=0, ge=0, le=1, description="Runner on 3rd base (0 or 1)"),
+    score_diff: int = Query(default=0, ge=-20, le=20, description="Score difference (home - away)"),
+    runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment"),
+    batter_ops: float | None = Query(default=None, ge=0.0, le=2.0, description="Batter OPS"),
+    pitcher_era: float | None = Query(default=None, ge=0.0, le=15.0, description="Pitcher ERA"),
+    lang: Lang = Query(default=Lang.ja, description="Commentary language (JA or EN)"),
+):
+    from fastapi import HTTPException
+
+    runners = (runner1, runner2, runner3)
+    result = full_analysis(
+        inning, top_bottom.value, outs, runners, score_diff,
+        runs_per_game, batter_ops, pitcher_era,
+    )
+
+    commentary = generate_commentary(result, lang=lang.value)
+    if commentary is None:
+        raise HTTPException(
+            status_code=503,
+            detail="GEMINI_API_KEY not configured. Set the environment variable to enable AI commentary.",
+        )
+
+    quality = evaluate_commentary_quality(commentary, result, lang=lang.value)
+
+    return {
+        **result,
+        "ai_commentary": commentary,
+        "quality_evaluation": quality,
+        "model": "gemini-2.5-flash",
+        "lang": lang.value,
+    }
+
+
+@app.get(
+    "/commentary/info",
+    summary="Commentary System Metadata",
+    description=(
+        "Returns current prompt version, quality criteria, and available versions. "
+        "Similar to /model/info in baseball-mlops Cloud Run API."
+    ),
+)
+def commentary_info():
+    return get_commentary_metadata()
 
 
 @app.get(

@@ -5,6 +5,7 @@ Dark theme UI — bilingual (EN / JA).
 Standalone — no CSV data needed, pure math engine.
 """
 
+import os
 import time
 import streamlit as st
 import streamlit.components.v1 as components
@@ -22,6 +23,7 @@ from win_probability import (
     li_label,
 )
 from live_feed import get_todays_games, get_live_state, get_game_plays
+from gemini_commentary import generate_commentary, evaluate_commentary_quality, PROMPT_VERSION
 
 
 st.set_page_config(
@@ -95,6 +97,11 @@ T = {
             "Walk": "Walk",
             "Ground Out": "Ground Out",
         },
+        "ai_commentary": "AI Commentary (Gemini)",
+        "ai_commentary_sub": "Powered by Gemini 2.5 Flash — real-time game situation analysis",
+        "ai_no_key": "Set `GEMINI_API_KEY` in Streamlit secrets or environment to enable AI commentary.",
+        "ai_generate": "Generate Commentary",
+        "ai_generating": "Generating commentary...",
         "re24_title": "RE24 Reference Table",
         "re24_sub": "Run Expectancy by 24 base-out states ({rpg:.1f} R/G environment)",
         "footer": "MLB Win Probability Engine | Markov Chain + RE24 Approach",
@@ -159,6 +166,11 @@ T = {
             "Walk": "四球",
             "Ground Out": "ゴロアウト",
         },
+        "ai_commentary": "AI 実況解説（Gemini）",
+        "ai_commentary_sub": "Gemini 2.5 Flash によるリアルタイム状況解説",
+        "ai_no_key": "`GEMINI_API_KEY` を Streamlit secrets または環境変数に設定すると AI 解説が有効になります。",
+        "ai_generate": "解説を生成",
+        "ai_generating": "解説を生成中...",
         "re24_title": "RE24 参照テーブル",
         "re24_sub": "24 塁上アウト状態別期待得点（{rpg:.1f} R/G 環境）",
         "footer": "MLB 勝利確率エンジン | マルコフ連鎖 + RE24 方式",
@@ -790,6 +802,72 @@ else:
             <br><span style="color: #888; font-size: 0.85rem;">{details}</span>
         </div>
         """, unsafe_allow_html=True)
+
+
+# ============================================================
+# AI Commentary (Gemini)
+# ============================================================
+
+st.markdown("---")
+st.markdown(f"## {_['ai_commentary']}")
+st.markdown(f"*{_['ai_commentary_sub']}*")
+
+gemini_key = st.secrets.get("GEMINI_API_KEY", os.environ.get("GEMINI_API_KEY"))
+if not gemini_key:
+    st.info(_["ai_no_key"])
+else:
+    # Initialize commentary cache in session state
+    if "commentary_cache" not in st.session_state:
+        st.session_state.commentary_cache = {}
+
+    if st.button(_["ai_generate"], key="gen_commentary"):
+        with st.spinner(_["ai_generating"]):
+            commentary = generate_commentary(
+                result, lang=lang, api_key=gemini_key,
+                cache=st.session_state.commentary_cache,
+            )
+        if commentary:
+            st.session_state.last_commentary = commentary
+            st.session_state.last_quality = evaluate_commentary_quality(commentary, result, lang)
+        else:
+            st.session_state.last_commentary = None
+            st.session_state.last_quality = None
+            st.warning("Commentary generation failed.")
+
+    # Display last generated commentary (persists across reruns)
+    if st.session_state.get("last_commentary"):
+        st.markdown(f"""
+        <div class="metric-card" style="padding: 20px; font-size: 1.1rem; line-height: 1.8;">
+            {st.session_state.last_commentary}
+        </div>
+        """, unsafe_allow_html=True)
+
+        # Quality evaluation display (MLOps observability)
+        quality = st.session_state.get("last_quality")
+        if quality:
+            score = quality["score"]
+            score_color = "#4caf50" if score >= 80 else "#ff9800" if score >= 60 else "#f44336"
+            pass_label = "PASS" if quality["pass"] else "FAIL"
+
+            checks = quality["checks"]
+            check_icons = {k: ("&#9989;" if v else "&#10060;") for k, v in checks.items()}
+
+            st.markdown(f"""
+            <div style="margin-top: 12px; padding: 12px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px solid #333;">
+                <span style="font-size: 0.85rem; color: #888;">Prompt {PROMPT_VERSION}</span>
+                &nbsp;&nbsp;
+                <span style="font-size: 1.1rem; font-weight: bold; color: {score_color};">{score}/100 ({pass_label})</span>
+                <br>
+                <span style="font-size: 0.8rem; color: #777;">
+                    {check_icons['mentions_wp']} WP
+                    &nbsp; {check_icons['mentions_li']} LI
+                    &nbsp; {check_icons['mentions_re24']} RE24
+                    &nbsp; {check_icons['mentions_whatif']} What-If
+                    &nbsp; {check_icons['mentions_tactics']} Tactics
+                    &nbsp; {check_icons['appropriate_length']} Length ({quality['char_count']}ch)
+                </span>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # ============================================================

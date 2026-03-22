@@ -20,6 +20,7 @@
 - **WPA (Win Probability Added)**: WP change from a single play
 - **Tactical Recommendations**: RE24-based evaluation of 8 tactical options (bunt, steal, squeeze, etc.)
 - **Matchup Adjustment**: Fine-tune WP with batter OPS and pitcher ERA
+- **AI Commentary (Gemini 2.5 Flash)**: Natural language game situation analysis with automated quality evaluation
 - **Live Feed**: Real-time game state via MLB Stats API (auto-refresh every 30s)
 - **Preset Scenarios**: 6 pre-built game situations for quick analysis
 - **Bilingual UI**: English / Japanese toggle
@@ -71,6 +72,37 @@ Response:
   "tactics": [...]
 }
 ```
+
+### `GET /wp/commentary` — AI Commentary (Gemini 2.5 Flash)
+
+```bash
+# 9th inning drama with AI analysis
+curl "http://localhost:8000/wp/commentary?inning=9&top_bottom=bottom&outs=2&runner1=1&runner2=1&runner3=1&score_diff=0&lang=JA"
+```
+
+Response:
+```json
+{
+  "win_probability": 0.93,
+  "leverage_index": 8.6,
+  "ai_commentary": "9回裏2アウト満塁、同点という...",
+  "quality_evaluation": {
+    "score": 95,
+    "pass": true,
+    "checks": {"mentions_wp": true, "mentions_li": true, ...}
+  },
+  "model": "gemini-2.5-flash",
+  "lang": "JA"
+}
+```
+
+### `GET /commentary/info` — Commentary System Metadata
+
+```bash
+curl "http://localhost:8000/commentary/info"
+```
+
+Returns prompt version, quality criteria, and available versions (similar to `/model/info` in [baseball-mlops](https://github.com/yasumorishima/baseball-mlops)).
 
 ### `GET /wp/play` — WPA for a Single Play
 
@@ -126,6 +158,76 @@ Evaluates 8 tactics by comparing expected RE24 values:
 - Pitching Change / Pinch Hitter / Hit and Run / Squeeze Play
 
 Each tactic has preconditions (e.g., steal requires a runner) and a success probability. The expected RE24 delta determines the recommendation.
+
+## AI Commentary Architecture
+
+Gemini 2.5 Flash を使ったリアルタイム状況解説機能。WP エンジンの構造化データ（勝利確率・レバレッジ指数・RE24・作戦提案・What-If 分析）を LLM に渡し、データに基づいた自然言語解説を生成。
+
+### データフロー
+
+```
+Game State (inning, outs, runners, score)
+    ↓
+WP Engine (Markov Chain + RE24)
+    ↓ full_analysis()
+┌─────────────────────────────────────────┐
+│ WP: 87.1%  LI: 11.19  RE24: 1.541     │
+│ Tactics: [Hit and Run: Recommended]     │
+│ What-If: HR→98.2%, K→83.4%, 1B→95.1%  │
+└─────────────────────────────────────────┘
+    ↓ Structured prompt (v2)
+Gemini 2.5 Flash API
+    ↓
+Natural language commentary
+    ↓
+Quality Evaluation (6 criteria, 100pt)
+    ↓
+W&B Logging (latency, tokens, quality score)
+```
+
+### MLOps Integration
+
+[baseball-mlops](https://github.com/yasumorishima/baseball-mlops) と同じ MLOps 設計思想を LLM 解説生成に適用：
+
+| baseball-mlops (ML model) | mlb-win-probability (LLM commentary) |
+|---|---|
+| Model versioning (W&B Artifact + production alias) | Prompt versioning (`PROMPT_REGISTRY` + `PROMPT_VERSION`) |
+| MAE evaluation (prediction vs actual) | Quality evaluation (6-criteria rule-based scoring, 100pt) |
+| W&B experiment tracking (MAE, hyperparams) | W&B tracking (quality score, latency, token count, prompt version) |
+| `/model/info` endpoint | `/commentary/info` endpoint |
+| APScheduler model cache (6h refresh) | Session-based commentary cache |
+| `continue-on-error` (non-blocking GCP/Discord) | Non-blocking W&B logging |
+
+### Quality Evaluation
+
+解説が分析データを適切に活用しているかを自動スコアリング：
+
+| Criterion | Weight | Check |
+|---|---|---|
+| Win Probability 言及 | 25pt | 勝利確率の数値またはキーワード |
+| Leverage Index 言及 | 20pt | プレッシャー/重要度への言及 |
+| Run Expectancy 言及 | 15pt | 期待得点/得点可能性への言及 |
+| What-If 言及 | 20pt | 次のプレイ別の WP 変動への言及 |
+| Tactics 言及 | 10pt | 推奨作戦がある場合の言及 |
+| 適切な長さ | 10pt | JA: 100-600文字 / EN: 150-800文字 |
+
+**60点以上で PASS**。品質スコアは W&B に時系列で記録され、プロンプト改善のフィードバックループを形成。
+
+### Setup
+
+```bash
+# Google AI Studio で無料 API キーを取得
+# https://aistudio.google.com/apikey
+
+# 環境変数に設定
+export GEMINI_API_KEY="your-api-key"
+
+# Streamlit Cloud の場合は secrets.toml に設定
+# GEMINI_API_KEY = "your-api-key"
+
+# W&B トラッキングを有効にする場合（任意）
+export WANDB_API_KEY="your-wandb-key"
+```
 
 ## Model Validation（精度検証）
 
@@ -208,8 +310,19 @@ Used for WP model validation and training. Each row represents a game state at a
 
 ## Planned
 
-- [x] Cloud Run API — RPi5 FastAPI を GCP Cloud Run に移行（サーバーレス化、RPi5 電源依存の解消）
+### Done
+- [x] Cloud Run API — RPi5 FastAPI を GCP Cloud Run に移行（サーバーレス化）
+- [x] AI Commentary — Gemini 2.5 Flash による状況解説生成（プロンプトバージョニング + 品質自動評価 + W&B 追跡）
+
+### In Progress
+- [ ] Gemini API キー設定 + Streamlit Cloud デプロイ — 実際の解説生成をライブで動作確認
+- [ ] Cloud Run に `/wp/commentary` デプロイ — サーバーレス API としての解説生成
+
+### Next
 - [ ] BQML モデル — BigQuery 上の play_states データで SQL だけの WP モデルを構築
+- [ ] プロンプト v3 改善 — v2 の品質スコア分析結果を基にプロンプトを反復改善
+- [ ] W&B Dashboard — 品質スコア・レイテンシ・トークン消費量の時系列可視化
+- [ ] NPB 解説モード — `runs_per_game=4.0` 時に NPB 文脈の解説を生成（犠打重視、投手交代タイミング等）
 
 ## License
 
