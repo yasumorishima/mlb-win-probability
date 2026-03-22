@@ -361,7 +361,6 @@ gh workflow run "Validate WP Model" \
 - [ ] 本番エンジン切り替え — アンサンブル or 最良単体エンジンを `calculate_wp()` に統合
 - [ ] Cloud Run 再デプロイ — アンサンブルエンジン + AI Commentary を含む最新版
 - [ ] プロンプト v3 改善 — v2 の品質スコア分析結果を基にプロンプトを反復改善
-- [ ] NPB 解説モード — `runs_per_game=4.0` 時に NPB 文脈の解説を生成
 
 ## License
 
