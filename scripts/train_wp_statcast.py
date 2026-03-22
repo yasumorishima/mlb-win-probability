@@ -27,6 +27,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from google.cloud import bigquery
 
 
 PROJECT = "data-platform-490901"
