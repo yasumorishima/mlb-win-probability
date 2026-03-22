@@ -340,25 +340,36 @@ gh workflow run "Validate WP Model" \
 | Artifact Registry | `us-central1-docker.pkg.dev/data-platform-490901/apis/mlb-win-probability-api` |
 | メモリ | 256Mi |
 
-## Planned
+## Roadmap
 
-### Done
-- [x] Cloud Run API — RPi5 FastAPI を GCP Cloud Run に移行（サーバーレス化）
-- [x] AI Commentary — Gemini 2.5 Flash による状況解説生成（プロンプトバージョニング + 品質自動評価 + W&B 追跡）
-- [x] BigQuery データ基盤 — 367K+ play states を BQ に格納、BQ エクスポートで高速データ取得
-- [x] 3 エンジン比較パイプライン — v1/v2/LightGBM の Brier Score 自動比較
-- [x] アンサンブル + キャリブレーション — inverse-Brier 加重 + Isotonic Regression
-- [x] Leave-one-year-out CV — 2015–2024 の年次安定性検証
+### Phase 1: 基盤構築 ✅
+- [x] WP エンジン v1（Markov Chain + Normal 近似 + Optuna 5 パラメータ最適化）
+- [x] FastAPI + Streamlit ダッシュボード（バイリンガル、ライブフィード、What-If）
+- [x] BigQuery データ基盤（367K+ play states、BQ エクスポートで秒単位データ取得）
+- [x] Cloud Run API デプロイ（認証付き、Artifact Registry）
+- [x] Grafana ダッシュボード（BQ 接続、公開）
 
-### In Progress
-- [ ] 3 エンジン精度比較結果の確認 → 最良構成を本番 WP エンジンに反映
-- [ ] Gemini API キー設定 + Streamlit Cloud デプロイ
+### Phase 2: 精度追い込み 🔄（現在）
+- [x] v2 エンジン構築（10 年分実データ WP テーブル + Markov Chain フォールバック）
+- [x] LightGBM エンジン構築（11 特徴量、時系列 holdout 分割）
+- [x] 3 エンジン比較パイプライン（GitHub Actions、BQ → CSV → 自動比較）
+- [x] アンサンブル実装（inverse-Brier 加重、baseball-mlops 同設計）
+- [x] Isotonic Regression キャリブレーション補正
+- [x] Leave-one-year-out CV（2015–2024、年次安定性検証）
+- [ ] **比較結果確認 → 最良構成を本番 `calculate_wp()` に反映**
+- [ ] **BQML モデル — BigQuery SQL だけで WP モデルを構築（4 番目のエンジン候補）**
 
-### Next
-- [ ] BQML モデル — BigQuery 上で SQL だけの WP モデルを構築（4 番目のエンジン候補）
-- [ ] 本番エンジン切り替え — アンサンブル or 最良単体エンジンを `calculate_wp()` に統合
-- [ ] Cloud Run 再デプロイ — アンサンブルエンジン + AI Commentary を含む最新版
-- [ ] プロンプト v3 改善 — v2 の品質スコア分析結果を基にプロンプトを反復改善
+### Phase 3: AI Commentary 🔄（現在）
+- [x] Gemini 2.5 Flash 解説生成（`/wp/commentary` エンドポイント）
+- [x] プロンプトバージョニング（`PROMPT_REGISTRY`）+ 品質自動評価（100pt）
+- [x] W&B 実験追跡（レイテンシ・トークン数・品質スコア）
+- [ ] **Gemini API キー設定 + Streamlit Cloud 実動作確認**
+- [ ] プロンプト v3 改善（v2 の品質スコア分析結果ベース）
+
+### Phase 4: 統合デプロイ
+- [ ] 本番エンジン切り替え（アンサンブル or 最良エンジン）
+- [ ] Cloud Run 再デプロイ（アンサンブル + AI Commentary + BQML 統合）
+- [ ] W&B Dashboard 構築（品質スコア・Brier Score の時系列可視化）
 
 ## License
 
