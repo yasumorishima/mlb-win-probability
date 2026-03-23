@@ -105,6 +105,43 @@ def get_live_state(game_pk: int) -> dict | None:
     defense = linescore.get("defense", {})
     pitcher_name = defense.get("pitcher", {}).get("fullName", "")
 
+    # Current count
+    plays_data = live_data.get("plays", {})
+    current_play = plays_data.get("currentPlay", {})
+    count = current_play.get("count", {})
+    balls = count.get("balls", 0)
+    strikes = count.get("strikes", 0)
+
+    # Latest pitch/hit data from current or last completed at-bat
+    pitch_data = None
+    hit_data = None
+    play_events = current_play.get("playEvents", [])
+    if play_events:
+        last_event = play_events[-1]
+        pd_raw = last_event.get("pitchData")
+        if pd_raw:
+            coords = pd_raw.get("coordinates", {})
+            pitch_data = {
+                "startSpeed": pd_raw.get("startSpeed"),
+                "endSpeed": pd_raw.get("endSpeed"),
+                "spinRate": pd_raw.get("spinRate"),
+                "zone": pd_raw.get("zone"),
+                "extension": pd_raw.get("extension"),
+                "coordinates": {
+                    "pfxX": coords.get("pfxX"),
+                    "pfxZ": coords.get("pfxZ"),
+                    "pX": coords.get("pX"),
+                    "pZ": coords.get("pZ"),
+                },
+            }
+        hd_raw = last_event.get("hitData")
+        if hd_raw:
+            hit_data = {
+                "launchSpeed": hd_raw.get("launchSpeed"),
+                "launchAngle": hd_raw.get("launchAngle"),
+                "totalDistance": hd_raw.get("totalDistance"),
+            }
+
     return {
         "inning": inning,
         "top_bottom": top_bottom,
@@ -118,6 +155,10 @@ def get_live_state(game_pk: int) -> dict | None:
         "away_team": away_team,
         "home_team": home_team,
         "status": status,
+        "balls": balls,
+        "strikes": strikes,
+        "pitch_data": pitch_data,
+        "hit_data": hit_data,
     }
 
 
@@ -172,6 +213,42 @@ def get_game_plays(game_pk: int) -> list[dict]:
         home_score = result.get("homeScore", prev_home)
         away_score = result.get("awayScore", prev_away)
 
+        # Extract pitch/hit data from the last playEvent (at-bat result pitch)
+        play_events = play.get("playEvents", [])
+        pitch_data = None
+        hit_data = None
+        count_data = {"balls": 0, "strikes": 0}
+        if play_events:
+            last_event = play_events[-1]
+            pd_raw = last_event.get("pitchData")
+            if pd_raw:
+                coords = pd_raw.get("coordinates", {})
+                pitch_data = {
+                    "startSpeed": pd_raw.get("startSpeed"),
+                    "endSpeed": pd_raw.get("endSpeed"),
+                    "spinRate": pd_raw.get("spinRate"),
+                    "zone": pd_raw.get("zone"),
+                    "extension": pd_raw.get("extension"),
+                    "coordinates": {
+                        "pfxX": coords.get("pfxX"),
+                        "pfxZ": coords.get("pfxZ"),
+                        "pX": coords.get("pX"),
+                        "pZ": coords.get("pZ"),
+                    },
+                }
+            hd_raw = last_event.get("hitData")
+            if hd_raw:
+                hit_data = {
+                    "launchSpeed": hd_raw.get("launchSpeed"),
+                    "launchAngle": hd_raw.get("launchAngle"),
+                    "totalDistance": hd_raw.get("totalDistance"),
+                }
+            count = last_event.get("count", {})
+            count_data = {
+                "balls": count.get("balls", 0),
+                "strikes": min(count.get("strikes", 0), 2),
+            }
+
         plays.append({
             "inning": inning,
             "top_bottom": top_bottom,
@@ -186,6 +263,10 @@ def get_game_plays(game_pk: int) -> list[dict]:
             "pitcher": matchup.get("pitcher", {}).get("fullName", ""),
             "home_team": home_team,
             "away_team": away_team,
+            "pitch_data": pitch_data,
+            "hit_data": hit_data,
+            "balls": count_data["balls"],
+            "strikes": count_data["strikes"],
         })
 
         prev_home = home_score

@@ -34,6 +34,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+from scipy.special import ndtr as _ndtr
 
 # Lazy imports for JAX/NumPyro (fail fast with clear message)
 try:
@@ -164,8 +165,7 @@ def compute_markov_wp(inning: int, half: str, outs: int,
     if var <= 0:
         return 0.99 if mean_diff > 0 else (0.01 if mean_diff < 0 else 0.52)
 
-    from scipy.stats import norm
-    wp = float(norm.cdf(mean_diff / np.sqrt(var)))
+    wp = float(_ndtr(mean_diff / np.sqrt(var)))
     return np.clip(wp, 0.005, 0.995)
 
 
@@ -200,39 +200,73 @@ def compute_leverage_index(inning: int, half: str, outs: int,
 
 
 def prepare_arrays(states: list[dict]) -> dict[str, np.ndarray]:
-    """Convert play states to numpy arrays for NumPyro."""
+    """Convert play states to numpy arrays for NumPyro (vectorized)."""
     n = len(states)
     years = sorted(set(s["year"] for s in states))
     year_to_idx = {y: i for i, y in enumerate(years)}
 
-    markov_wp = np.zeros(n, dtype=np.float32)
-    leverage = np.zeros(n, dtype=np.float32)
-    home_idx = np.zeros(n, dtype=np.int32)
-    away_idx = np.zeros(n, dtype=np.int32)
-    season_idx = np.zeros(n, dtype=np.int32)
-    y = np.zeros(n, dtype=np.float32)
+    # Extract columns as arrays first (avoid per-row dict access)
+    inning = np.array([s["inning"] for s in states], dtype=np.float32)
+    is_bottom = np.array([s["half_inning"] == "bottom" for s in states])
+    outs = np.array([s["outs"] for s in states], dtype=np.float32)
+    r1 = np.array([s["r1"] for s in states], dtype=np.float32)
+    r2 = np.array([s["r2"] for s in states], dtype=np.float32)
+    r3 = np.array([s["r3"] for s in states], dtype=np.float32)
+    score_diff = np.array([s["score_diff"] for s in states], dtype=np.float32)
 
-    for i, s in enumerate(states):
-        wp = compute_markov_wp(
-            s["inning"], s["half_inning"], s["outs"],
-            s["r1"], s["r2"], s["r3"], s["score_diff"])
-        markov_wp[i] = wp
+    home_idx = np.array([TEAM_TO_IDX[s["home_team"]] for s in states],
+                        dtype=np.int32)
+    away_idx = np.array([TEAM_TO_IDX[s["away_team"]] for s in states],
+                        dtype=np.int32)
+    season_idx = np.array([year_to_idx[s["year"]] for s in states],
+                          dtype=np.int32)
+    y = np.array([s["home_won"] for s in states], dtype=np.float32)
 
-        li = compute_leverage_index(
-            s["inning"], s["half_inning"], s["outs"],
-            s["r1"], s["r2"], s["r3"], s["score_diff"])
-        leverage[i] = li
+    # --- Vectorized Markov WP ---
+    runs_per_game = 4.5
+    rphi = runs_per_game / 18.0
 
-        home_idx[i] = TEAM_TO_IDX[s["home_team"]]
-        away_idx[i] = TEAM_TO_IDX[s["away_team"]]
-        season_idx[i] = year_to_idx[s["year"]]
-        y[i] = s["home_won"]
+    # Remaining half-innings (top/bottom differ by 1)
+    home_hi = np.where(is_bottom,
+                       np.maximum(0, 18 - 2 * inning),
+                       np.maximum(0, 18 - 2 * inning + 1))
+    away_hi = home_hi.copy()
 
-    # Logit transform of Markov WP (clipped to avoid inf)
+    outs_frac = 1.0 - outs / 3.0
+
+    runner_re = r1 * 0.37 + r2 * 0.70 + r3 * 1.00
+    runner_re = np.where(is_bottom, runner_re, -runner_re)
+
+    mean_diff = score_diff + runner_re
+    var = rphi * (home_hi + away_hi + outs_frac) * 1.3
+
+    markov_wp = np.where(
+        var <= 0,
+        np.where(mean_diff > 0, 0.99, np.where(mean_diff < 0, 0.01, 0.52)),
+        np.clip(_ndtr(mean_diff / np.sqrt(np.maximum(var, 1e-10))),
+                0.005, 0.995)
+    ).astype(np.float32)
+
+    # --- Vectorized Leverage Index ---
+    inn_factor = np.minimum(inning / 9.0, 1.5)
+    abs_diff = np.abs(score_diff)
+    close_factor = np.maximum(0, 1.0 - abs_diff / 5.0)
+    runner_factor = 1.0 + (r1 + r2 + r3) * 0.15
+    outs_factor = 1.0 + outs * 0.1
+
+    leverage = inn_factor * close_factor * runner_factor * outs_factor
+    # High-leverage boosts
+    leverage = np.where(
+        (inning >= 7) & (abs_diff <= 2), leverage * 1.5, leverage)
+    leverage = np.where(
+        (inning >= 9) & is_bottom & (abs_diff <= 1), leverage * 2.0, leverage)
+    leverage = np.clip(leverage, 0.1, 5.0).astype(np.float32)
+
+    # Logit transform of Markov WP
     wp_clipped = np.clip(markov_wp, 0.005, 0.995)
     logit_wp = np.log(wp_clipped / (1 - wp_clipped))
 
-    # Normalize leverage to mean=0, std=1 for better optimization
+    # Normalize leverage
     li_mean = leverage.mean()
     li_std = leverage.std() + 1e-8
     leverage_norm = (leverage - li_mean) / li_std
@@ -348,17 +382,27 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
     optimizer = numpyro.optim.ClippedAdam(step_size=lr)
     svi = SVI(bayesian_wp_model, guide, optimizer, loss=Trace_ELBO())
 
+    # Convert to JAX arrays once (avoid re-conversion every step)
+    jax_arrays = {
+        "logit_markov_wp": jnp.array(arrays["logit_markov_wp"]),
+        "leverage_norm": jnp.array(arrays["leverage_norm"]),
+        "home_idx": jnp.array(arrays["home_idx"]),
+        "away_idx": jnp.array(arrays["away_idx"]),
+        "season_idx": jnp.array(arrays["season_idx"]),
+        "y": jnp.array(arrays["y"]),
+    }
+
     # Initialize
     svi_state = svi.init(
         rng_key,
-        logit_markov_wp=jnp.array(arrays["logit_markov_wp"]),
-        leverage_norm=jnp.array(arrays["leverage_norm"]),
-        home_idx=jnp.array(arrays["home_idx"]),
-        away_idx=jnp.array(arrays["away_idx"]),
-        season_idx=jnp.array(arrays["season_idx"]),
+        logit_markov_wp=jax_arrays["logit_markov_wp"],
+        leverage_norm=jax_arrays["leverage_norm"],
+        home_idx=jax_arrays["home_idx"],
+        away_idx=jax_arrays["away_idx"],
+        season_idx=jax_arrays["season_idx"],
         n_teams=n_teams,
         n_seasons=n_seasons,
-        y=jnp.array(arrays["y"]),
+        y=jax_arrays["y"],
     )
 
     # Training loop
@@ -367,25 +411,34 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
     t0 = time.time()
 
     for step in range(n_steps):
-        rng_key, step_key = jrandom.split(rng_key)
         svi_state, loss = svi.update(
             svi_state,
-            logit_markov_wp=jnp.array(arrays["logit_markov_wp"]),
-            leverage_norm=jnp.array(arrays["leverage_norm"]),
-            home_idx=jnp.array(arrays["home_idx"]),
-            away_idx=jnp.array(arrays["away_idx"]),
-            season_idx=jnp.array(arrays["season_idx"]),
+            logit_markov_wp=jax_arrays["logit_markov_wp"],
+            leverage_norm=jax_arrays["leverage_norm"],
+            home_idx=jax_arrays["home_idx"],
+            away_idx=jax_arrays["away_idx"],
+            season_idx=jax_arrays["season_idx"],
             n_teams=n_teams,
             n_seasons=n_seasons,
-            y=jnp.array(arrays["y"]),
+            y=jax_arrays["y"],
         )
         losses.append(float(loss))
 
-        if (step + 1) % 2000 == 0 or step == 0:
+        if (step + 1) % 500 == 0 or step == 0:
             elapsed = time.time() - t0
             avg_loss = np.mean(losses[-500:]) if len(losses) >= 500 else np.mean(losses)
             print(f"    Step {step + 1:>6}/{n_steps}: ELBO loss = {avg_loss:.2f} "
                   f"({elapsed:.0f}s)")
+
+            # Early stopping: check if ELBO has plateaued
+            if len(losses) >= 1000:
+                recent = np.mean(losses[-500:])
+                earlier = np.mean(losses[-1000:-500])
+                rel_change = abs(recent - earlier) / (abs(earlier) + 1e-8)
+                if rel_change < 1e-4:
+                    print(f"  Early stopping at step {step + 1} "
+                          f"(rel_change={rel_change:.2e})")
+                    break
 
     elapsed = time.time() - t0
     print(f"  Training complete in {elapsed:.0f}s")
@@ -404,11 +457,11 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
 
     posterior_samples = predictive(
         pred_key,
-        logit_markov_wp=jnp.array(arrays["logit_markov_wp"][:1]),
-        leverage_norm=jnp.array(arrays["leverage_norm"][:1]),
-        home_idx=jnp.array(arrays["home_idx"][:1]),
-        away_idx=jnp.array(arrays["away_idx"][:1]),
-        season_idx=jnp.array(arrays["season_idx"][:1]),
+        logit_markov_wp=jax_arrays["logit_markov_wp"][:1],
+        leverage_norm=jax_arrays["leverage_norm"][:1],
+        home_idx=jax_arrays["home_idx"][:1],
+        away_idx=jax_arrays["away_idx"][:1],
+        season_idx=jax_arrays["season_idx"][:1],
         n_teams=n_teams,
         n_seasons=n_seasons,
     )
@@ -518,7 +571,7 @@ def main():
     parser.add_argument("--data-dir", default="data/")
     parser.add_argument("--output-dir", default="data/")
     parser.add_argument("--test-year", type=int, default=2024)
-    parser.add_argument("--n-steps", type=int, default=20000,
+    parser.add_argument("--n-steps", type=int, default=5000,
                         help="SVI optimization steps")
     parser.add_argument("--lr", type=float, default=0.005,
                         help="Learning rate for Adam optimizer")

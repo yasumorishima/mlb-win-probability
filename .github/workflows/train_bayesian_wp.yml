@@ -10,7 +10,7 @@ on:
       n_steps:
         description: 'SVI optimization steps'
         required: false
-        default: '20000'
+        default: '5000'
       test_year:
         description: 'Holdout test year'
         required: false
@@ -135,10 +135,9 @@ jobs:
           bayes = r['bayesian']['brier']
           imp = r['improvement_vs_markov_pct']
           ci = r['bayesian'].get('ci_width_mean', 'N/A')
-          print(f'Brier: {bayes:.6f} ({imp:+.2f}% vs Markov)')
-          print(f'CI width: {ci} | Steps: {r[\"n_steps\"]}')
+          print(f'Brier: {bayes:.6f} ({imp:+.2f}% vs Markov) | CI width: {ci} | Steps: {r[\"n_steps\"]}')
           ")
-            BODY="**Bayesian WP Model** ✅ ${METRICS} ${RUN_URL}"
+            BODY="**Bayesian WP Model** ✅ ${METRICS} | ${RUN_URL}"
           else
             BODY="**Bayesian WP Model** ❌ ${STATUS} | ${{ inputs.memo }} | ${RUN_URL}"
           fi
