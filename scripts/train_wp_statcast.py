@@ -151,7 +151,10 @@ def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     features["in_zone"] = df["zone"].fillna(0).apply(lambda z: 1 if 1 <= z <= 9 else 0)
     features["release_ext"] = df["release_extension"].fillna(
         df["release_extension"].median())
-    features["arm_angle"] = df["arm_angle"].fillna(df["arm_angle"].median())
+    if "arm_angle" in df.columns:
+        features["arm_angle"] = df["arm_angle"].fillna(df["arm_angle"].median())
+    else:
+        features["arm_angle"] = 0
 
     # --- Batted ball quality ---
     features["launch_speed"] = df["launch_speed"].fillna(0)
