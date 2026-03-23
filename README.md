@@ -417,7 +417,9 @@ gh workflow run "Validate WP Model" \
 - [x] GitHub Actions ワークフロー（`Train Bayesian WP Model`）
 - [x] Streamlit 信用区間バー表示（WP ゲージ下に 90% CI バンド）
 - [x] タイムアウト対策（ベクトル化 117 倍高速化 + 早期停止）
-- [ ] **初回学習結果待ち**（SVI 5,000 steps + 早期停止、2015–2023 学習 / 2024 ホールドアウト）
+- [x] 初回学習完走（Brier 0.1650 — Markov 比 -1.96%、改善ならず）
+- [x] バグ修正: season index ミスマッチ（test が 2015 の効果を使用していた）+ prior 境界張り付き解消
+- [ ] **修正後の再学習結果待ち**（prior 拡大 + season idx 修正 + 診断ログ追加）
 - [ ] チーム力ランキング・球場効果の検証
 - [ ] 本番アンサンブルへの組み込み（5 エンジン構成）
 
