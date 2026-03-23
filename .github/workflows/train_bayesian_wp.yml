@@ -34,7 +34,20 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install numpyro jax jaxlib numpy scipy pandas
+          pip install numpyro jax jaxlib numpy scipy pandas google-cloud-bigquery pyarrow db-dtypes
+
+      - name: Authenticate GCP
+        env:
+          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+        run: |
+          echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json" >> $GITHUB_ENV
+
+      - name: Export play_states from BigQuery
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+        run: |
+          python scripts/export_from_bq.py --output-dir data/
 
       - name: Train Bayesian WP model
         run: |
