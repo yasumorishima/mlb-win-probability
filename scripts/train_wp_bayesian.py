@@ -199,11 +199,23 @@ def compute_leverage_index(inning: int, half: str, outs: int,
     return max(0.1, min(li, 5.0))
 
 
-def prepare_arrays(states: list[dict]) -> dict[str, np.ndarray]:
-    """Convert play states to numpy arrays for NumPyro (vectorized)."""
+def prepare_arrays(states: list[dict],
+                    year_to_idx: dict[int, int] | None = None,
+                    ) -> dict[str, np.ndarray]:
+    """Convert play states to numpy arrays for NumPyro (vectorized).
+
+    Args:
+        states: List of play state dicts.
+        year_to_idx: If provided, use this mapping for season indices.
+            For test sets, pass the train's mapping so season effects align.
+            Years not in the mapping use the last index (extrapolation).
+    """
     n = len(states)
-    years = sorted(set(s["year"] for s in states))
-    year_to_idx = {y: i for i, y in enumerate(years)}
+    if year_to_idx is None:
+        years = sorted(set(s["year"] for s in states))
+        year_to_idx = {y: i for i, y in enumerate(years)}
+    else:
+        years = sorted(year_to_idx.keys())
 
     # Extract columns as arrays first (avoid per-row dict access)
     inning = np.array([s["inning"] for s in states], dtype=np.float32)
@@ -218,8 +230,10 @@ def prepare_arrays(states: list[dict]) -> dict[str, np.ndarray]:
                         dtype=np.int32)
     away_idx = np.array([TEAM_TO_IDX[s["away_team"]] for s in states],
                         dtype=np.int32)
-    season_idx = np.array([year_to_idx[s["year"]] for s in states],
-                          dtype=np.int32)
+    max_season_idx = max(year_to_idx.values())
+    season_idx = np.array(
+        [year_to_idx.get(s["year"], max_season_idx) for s in states],
+        dtype=np.int32)
     y = np.array([s["home_won"] for s in states], dtype=np.float32)
 
     # --- Vectorized Markov WP ---
@@ -306,9 +320,11 @@ def bayesian_wp_model(logit_markov_wp, leverage_norm,
     n_obs = logit_markov_wp.shape[0]
 
     # --- Hyperpriors ---
-    sigma_team = numpyro.sample("sigma_team", dist.HalfNormal(0.3))
-    sigma_park = numpyro.sample("sigma_park", dist.HalfNormal(0.15))
-    sigma_season = numpyro.sample("sigma_season", dist.HalfNormal(0.1))
+    # Priors must be wide enough that posteriors don't hit the boundary.
+    # Previous run: posteriors at 0.31/0.23/0.13 against 0.3/0.15/0.1 priors.
+    sigma_team = numpyro.sample("sigma_team", dist.HalfNormal(1.0))
+    sigma_park = numpyro.sample("sigma_park", dist.HalfNormal(0.5))
+    sigma_season = numpyro.sample("sigma_season", dist.HalfNormal(0.5))
 
     # --- Team strengths (non-centered parameterization) ---
     # Zero-sum: the league average is already in the Markov baseline
@@ -359,6 +375,7 @@ def bayesian_wp_model(logit_markov_wp, leverage_norm,
     )
 
     # --- Observation model ---
+    # Subsampling is standard for SVI; plate auto-scales the likelihood.
     with numpyro.plate("obs", n_obs, subsample_size=min(n_obs, 65536)) as idx:
         numpyro.sample("y",
                         dist.Bernoulli(logits=logit_wp[idx]),
@@ -427,21 +444,38 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
         if (step + 1) % 500 == 0 or step == 0:
             elapsed = time.time() - t0
             avg_loss = np.mean(losses[-500:]) if len(losses) >= 500 else np.mean(losses)
-            print(f"    Step {step + 1:>6}/{n_steps}: ELBO loss = {avg_loss:.2f} "
-                  f"({elapsed:.0f}s)")
 
-            # Early stopping: check if ELBO has plateaued
+            # Always show convergence info when available
+            rel_info = ""
             if len(losses) >= 1000:
                 recent = np.mean(losses[-500:])
                 earlier = np.mean(losses[-1000:-500])
                 rel_change = abs(recent - earlier) / (abs(earlier) + 1e-8)
-                if rel_change < 1e-4:
+                rel_info = f" | rel_change={rel_change:.2e}"
+
+            print(f"    Step {step + 1:>6}/{n_steps}: ELBO loss = {avg_loss:.2f} "
+                  f"({elapsed:.0f}s){rel_info}")
+
+            # Early stopping: check if ELBO has plateaued
+            if len(losses) >= 2000:
+                recent_es = np.mean(losses[-500:])
+                earlier_es = np.mean(losses[-1500:-1000])
+                rel_change_es = abs(recent_es - earlier_es) / (abs(earlier_es) + 1e-8)
+                if rel_change_es < 5e-5:
                     print(f"  Early stopping at step {step + 1} "
-                          f"(rel_change={rel_change:.2e})")
+                          f"(rel_change={rel_change_es:.2e} < 5e-5)")
                     break
 
+    actual_steps = len(losses)
     elapsed = time.time() - t0
-    print(f"  Training complete in {elapsed:.0f}s")
+    final_loss = np.mean(losses[-500:]) if len(losses) >= 500 else np.mean(losses)
+    print(f"  Training complete: {actual_steps} steps in {elapsed:.0f}s "
+          f"({elapsed/actual_steps:.2f}s/step)")
+    print(f"  Final ELBO loss: {final_loss:.2f}")
+    if actual_steps < n_steps:
+        print(f"  (Early stopped at {actual_steps}/{n_steps})")
+    else:
+        print(f"  (Ran full {n_steps} steps — consider increasing if still improving)")
 
     # Extract posterior samples
     params = svi.get_params(svi_state)
@@ -609,7 +643,11 @@ def main():
     print("=" * 60)
 
     train_arrays = prepare_arrays(train_states)
-    test_arrays = prepare_arrays(test_states)
+
+    # Test uses train's year_to_idx so season effects align correctly.
+    # 2024 (test year) maps to last season index (extrapolation from 2023).
+    train_year_to_idx = {y: i for i, y in enumerate(train_arrays["years"])}
+    test_arrays = prepare_arrays(test_states, year_to_idx=train_year_to_idx)
 
     # Use train normalization for test leverage
     test_arrays["leverage_norm"] = (
@@ -617,12 +655,25 @@ def main():
         / train_arrays["leverage_std"]
     ).astype(np.float32)
 
+    # Override test n_seasons to match train (for posterior indexing)
+    test_arrays["n_seasons"] = train_arrays["n_seasons"]
+
     print(f"  Train features: {len(train_arrays['y']):,} obs, "
           f"{train_arrays['n_seasons']} seasons")
     print(f"  Test features:  {len(test_arrays['y']):,} obs")
     print(f"  Teams: {N_TEAMS}")
     print(f"  Leverage (train): mean={train_arrays['leverage'].mean():.2f}, "
           f"std={train_arrays['leverage'].std():.2f}")
+
+    # Diagnostic: season index mapping
+    print(f"\n  Season index mapping (train):")
+    for yr, idx in sorted(train_year_to_idx.items()):
+        print(f"    {yr} -> idx {idx}")
+    test_sidx = test_arrays["season_idx"]
+    print(f"  Test season_idx: min={test_sidx.min()}, max={test_sidx.max()}, "
+          f"unique={np.unique(test_sidx).tolist()}")
+    print(f"  (Test year {args.test_year} -> idx {test_sidx[0]} "
+          f"= extrapolate from {train_arrays['years'][-1]})")
 
     # -------------------------------------------------------
     # Markov baseline (on test set)
@@ -651,14 +702,24 @@ def main():
     print("POSTERIOR SUMMARY")
     print("=" * 60)
 
-    # Hyperparameters
+    # Hyperparameters with prior boundary check
+    prior_scales = {
+        "sigma_team": 1.0, "sigma_park": 0.5, "sigma_season": 0.5,
+        "kappa": 0.2, "hfa_correction": 0.1,
+    }
     for param in ["sigma_team", "sigma_park", "sigma_season", "kappa",
                    "hfa_correction"]:
         vals = np.array(posterior[param])
-        print(f"  {param}: mean={vals.mean():.4f}, "
-              f"std={vals.std():.4f}, "
-              f"90% CI=[{np.percentile(vals, 5):.4f}, "
-              f"{np.percentile(vals, 95):.4f}]")
+        mean = vals.mean()
+        ci_lo = np.percentile(vals, 5)
+        ci_hi = np.percentile(vals, 95)
+        prior_scale = prior_scales[param]
+        # For HalfNormal, effective boundary ≈ 2*scale; for Normal, ≈ 2*scale
+        ratio = abs(mean) / prior_scale
+        boundary_warn = " *** NEAR PRIOR BOUNDARY ***" if ratio > 0.8 else ""
+        print(f"  {param}: mean={mean:.4f}, std={vals.std():.4f}, "
+              f"90% CI=[{ci_lo:.4f}, {ci_hi:.4f}] "
+              f"(prior_scale={prior_scale}, ratio={ratio:.2f}){boundary_warn}")
 
     # Team strengths
     team_str = np.array(posterior["team_strength"])  # (500, n_teams)
