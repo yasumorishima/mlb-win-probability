@@ -43,7 +43,7 @@ try:
     import numpyro.distributions as dist
     from jax import random as jrandom
     from numpyro.infer import SVI, Predictive, Trace_ELBO
-    from numpyro.infer.autoguide import AutoMultiDiagonalNormal
+    from numpyro.infer.autoguide import AutoNormal
 except ImportError as e:
     print(f"ERROR: {e}")
     print("Install: pip install numpyro jax jaxlib")
@@ -344,7 +344,7 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
     n_seasons = arrays["n_seasons"]
 
     # SVI setup
-    guide = AutoMultiDiagonalNormal(bayesian_wp_model)
+    guide = AutoNormal(bayesian_wp_model)
     optimizer = numpyro.optim.ClippedAdam(step_size=lr)
     svi = SVI(bayesian_wp_model, guide, optimizer, loss=Trace_ELBO())
 
