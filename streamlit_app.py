@@ -666,6 +666,17 @@ wp = result["win_probability"]
 li_val = result["leverage_index"]
 li_lbl = result["leverage_label"]
 
+# Bayesian credible interval (if posterior available)
+bayes_ci = None
+try:
+    from win_probability_bayesian import WPEngineBayesian
+    _bayes_engine = WPEngineBayesian()
+    if _bayes_engine.is_loaded:
+        bayes_ci = _bayes_engine.calculate_wp_with_ci(
+            inning, top_bottom, outs, runners, score_diff, rpg)
+except Exception:
+    pass
+
 st.markdown("---")
 
 
@@ -740,6 +751,45 @@ with col_gauge:
     if result.get("adjusted_wp") is not None:
         adj = result["adjusted_wp"]
         st.markdown(f"**{_['matchup_adj_label'].format(pct=adj * 100)}**")
+
+    # Bayesian 90% Credible Interval bar
+    if bayes_ci is not None and bayes_ci.ci_width > 0:
+        ci_lo = bayes_ci.wp_lower * 100
+        ci_hi = bayes_ci.wp_upper * 100
+        ci_label = (
+            "90% Credible Interval" if lang == "EN"
+            else "90% 信用区間"
+        )
+        # Horizontal bar showing the CI range
+        fig_ci = go.Figure()
+        fig_ci.add_trace(go.Bar(
+            y=[ci_label],
+            x=[ci_hi - ci_lo],
+            base=[ci_lo],
+            orientation="h",
+            marker=dict(color="rgba(0, 229, 255, 0.25)",
+                        line=dict(color="#00e5ff", width=1)),
+            text=f"{ci_lo:.1f}% — {ci_hi:.1f}%",
+            textposition="inside",
+            textfont=dict(color="#00e5ff", size=14),
+            hoverinfo="skip",
+        ))
+        # Point estimate marker
+        fig_ci.add_vline(
+            x=bayes_ci.wp * 100,
+            line=dict(color="#00e5ff", width=2, dash="solid"))
+        fig_ci.update_layout(
+            xaxis=dict(range=[0, 100], showticklabels=True,
+                       tickcolor="#666", tickfont=dict(color="#999")),
+            yaxis=dict(showticklabels=False),
+            paper_bgcolor="#0a0a1a",
+            plot_bgcolor="#0a0a1a",
+            font=dict(color="#e0e0e0"),
+            height=70,
+            margin=dict(t=5, b=20, l=5, r=5),
+            showlegend=False,
+        )
+        st.plotly_chart(fig_ci, use_container_width=True)
 
 with col_li:
     st.markdown(f"### {_['leverage_index']}")

@@ -50,6 +50,8 @@ def load_play_states(csv_path: Path) -> list[dict]:
                                 int(row["runner_3b"])),
                     "score_diff": int(row["score_diff"]),
                     "home_won": int(row["home_won"]),
+                    "home_team": row.get("home_team", ""),
+                    "away_team": row.get("away_team", ""),
                 })
             except (ValueError, KeyError):
                 continue
@@ -113,6 +115,23 @@ def predict_v2(states: list[dict], data_dir: Path,
         return None
 
 
+def _states_to_rows(states: list[dict]) -> list[dict]:
+    """Convert internal state dicts to CSV-row-like dicts for extract_features."""
+    rows = []
+    for s in states:
+        rows.append({
+            "inning": str(s["inning"]),
+            "half_inning": s["half_inning"],
+            "outs": str(s["outs"]),
+            "runner_1b": str(s["runners"][0]),
+            "runner_2b": str(s["runners"][1]),
+            "runner_3b": str(s["runners"][2]),
+            "score_diff": str(s["score_diff"]),
+            "home_won": str(s["home_won"]),
+        })
+    return rows
+
+
 def predict_lgbm(states: list[dict], data_dir: Path) -> np.ndarray | None:
     """Generate predictions using LightGBM model."""
     lgbm_path = data_dir / "wp_lgbm_model.txt"
@@ -120,27 +139,79 @@ def predict_lgbm(states: list[dict], data_dir: Path) -> np.ndarray | None:
         return None
     try:
         import lightgbm as lgb
-        model = lgb.Booster(model_file=str(lgbm_path))
+        from scripts.train_wp_lgbm import extract_features
 
-        X = np.array([
-            [
-                s["inning"],
-                1 if s["half_inning"] == "bottom" else 0,
-                s["outs"],
-                s["runners"][0], s["runners"][1], s["runners"][2],
-                s["score_diff"],
-                s["inning"] * (1 if s["half_inning"] == "bottom" else 0),
-                abs(s["score_diff"]),
-                sum(s["runners"]),
-                max(9 - s["inning"], 0) * (
-                    1 if s["score_diff"] == 0 else 0),
-            ]
-            for s in states
-        ])
+        model = lgb.Booster(model_file=str(lgbm_path))
+        rows = _states_to_rows(states)
+        X = np.array([extract_features(r) for r in rows])
         return model.predict(X)
     except ImportError:
         print("  LightGBM not installed")
         return None
+
+
+def predict_catboost(states: list[dict], data_dir: Path) -> np.ndarray | None:
+    """Generate predictions using CatBoost model."""
+    cb_path = data_dir / "wp_catboost_model.cbm"
+    if not cb_path.exists():
+        return None
+    try:
+        from catboost import CatBoostClassifier
+        from scripts.train_wp_lgbm import extract_features
+
+        model = CatBoostClassifier()
+        model.load_model(str(cb_path))
+        rows = _states_to_rows(states)
+        X = np.array([extract_features(r) for r in rows])
+        return model.predict_proba(X)[:, 1]
+    except ImportError:
+        print("  CatBoost not installed")
+        return None
+
+
+def predict_bayesian(states: list[dict], data_dir: Path,
+                     ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+    """Generate predictions using Bayesian hierarchical model.
+
+    Returns: (mean_wp, lower_5, upper_95) or (None, None, None).
+    """
+    posterior_path = data_dir / "bayesian_posterior.json"
+    if not posterior_path.exists():
+        return None, None, None
+    try:
+        from win_probability_bayesian import WPEngineBayesian
+
+        engine = WPEngineBayesian(data_dir)
+        if not engine.is_loaded:
+            return None, None, None
+
+        mean_preds = np.zeros(len(states))
+        lower_preds = np.zeros(len(states))
+        upper_preds = np.zeros(len(states))
+
+        for i, s in enumerate(states):
+            # States have home_team/away_team as full names, need abbreviation
+            from scripts.train_wp_bayesian import TEAM_ABBREV
+            home = TEAM_ABBREV.get(
+                s.get("home_team", ""), s.get("home_team", ""))
+            away = TEAM_ABBREV.get(
+                s.get("away_team", ""), s.get("away_team", ""))
+
+            result = engine.calculate_wp_with_ci(
+                s["inning"], s["half_inning"], s["outs"],
+                s["runners"], s["score_diff"],
+                home_team=home, away_team=away,
+                n_samples=100)
+
+            mean_preds[i] = result.wp
+            lower_preds[i] = result.wp_lower
+            upper_preds[i] = result.wp_upper
+
+        return mean_preds, lower_preds, upper_preds
+
+    except Exception as e:
+        print(f"  Bayesian prediction failed: {e}")
+        return None, None, None
 
 
 def compute_brier(preds: np.ndarray, actuals: np.ndarray) -> float:
@@ -380,6 +451,19 @@ def main():
             print(f"  Brier: {engine_briers['v2']:.6f} | ECE: {v2_ece:.4f}")
         else:
             print("  SKIP: v2 not available")
+
+        print("\n[bayesian] Bayesian Hierarchical...")
+        bayes_preds, bayes_lower, bayes_upper = predict_bayesian(
+            test_states, data_dir)
+        if bayes_preds is not None:
+            engine_preds["bayesian"] = bayes_preds
+            engine_briers["bayesian"] = compute_brier(bayes_preds, actuals)
+            bayes_ece = compute_ece(bayes_preds, actuals)
+            ci_width = float(np.mean(bayes_upper - bayes_lower))
+            print(f"  Brier: {engine_briers['bayesian']:.6f} | "
+                  f"ECE: {bayes_ece:.4f} | Mean CI: {ci_width:.4f}")
+        else:
+            print("  SKIP: Bayesian not available")
 
         print("\n[lgbm] LightGBM...")
         lgbm_preds = predict_lgbm(test_states, data_dir)

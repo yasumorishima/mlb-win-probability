@@ -90,25 +90,47 @@ def load_from_bq(test_year: int = 2024) -> tuple[pd.DataFrame, pd.DataFrame]:
     return train, test
 
 
+def _safe_col(df: pd.DataFrame, col: str, fill: float = 0,
+              use_median: bool = False) -> pd.Series:
+    """Safely access a DataFrame column, returning fill value if missing."""
+    if col not in df.columns:
+        return pd.Series(fill, index=df.index, dtype=float)
+    if use_median:
+        median_val = df[col].median()
+        return df[col].fillna(median_val if pd.notna(median_val) else fill)
+    return df[col].fillna(fill)
+
+
 def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     """
     Engineer 70+ features from raw Statcast data.
     Returns feature matrix and feature names.
+    All column accesses are guarded against missing columns in BQ.
     """
     features = pd.DataFrame(index=df.index)
 
     # --- Game state (core) ---
-    features["inning"] = df["inning"].fillna(1)
-    features["is_bottom"] = df.get("is_bottom", (df["inning_topbot"] == "Bot").astype(int))
-    features["outs"] = df["outs_when_up"].fillna(0)
-    features["balls"] = df["balls"].fillna(0)
-    features["strikes"] = df["strikes"].fillna(0)
-    features["score_diff"] = df.get("score_diff", df["home_score"] - df["away_score"]).fillna(0)
+    features["inning"] = _safe_col(df, "inning", fill=1)
+    if "is_bottom" in df.columns:
+        features["is_bottom"] = df["is_bottom"]
+    elif "inning_topbot" in df.columns:
+        features["is_bottom"] = (df["inning_topbot"] == "Bot").astype(int)
+    else:
+        features["is_bottom"] = 0
+    features["outs"] = _safe_col(df, "outs_when_up")
+    features["balls"] = _safe_col(df, "balls")
+    features["strikes"] = _safe_col(df, "strikes")
+    if "score_diff" in df.columns:
+        features["score_diff"] = df["score_diff"].fillna(0)
+    elif "home_score" in df.columns and "away_score" in df.columns:
+        features["score_diff"] = (df["home_score"] - df["away_score"]).fillna(0)
+    else:
+        features["score_diff"] = 0
 
     # Runners
-    features["r1"] = df["on_1b"].notna().astype(int)
-    features["r2"] = df["on_2b"].notna().astype(int)
-    features["r3"] = df["on_3b"].notna().astype(int)
+    features["r1"] = df["on_1b"].notna().astype(int) if "on_1b" in df.columns else 0
+    features["r2"] = df["on_2b"].notna().astype(int) if "on_2b" in df.columns else 0
+    features["r3"] = df["on_3b"].notna().astype(int) if "on_3b" in df.columns else 0
     features["total_runners"] = features["r1"] + features["r2"] + features["r3"]
     features["scoring_position"] = features["r2"] + features["r3"]
 
@@ -139,31 +161,28 @@ def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     features["scoring_x_outs"] = features["scoring_position"] * features["outs"]
 
     # --- Pitch characteristics ---
-    features["release_speed"] = df["release_speed"].fillna(df["release_speed"].median())
-    features["effective_speed"] = df["effective_speed"].fillna(features["release_speed"])
-    features["pfx_x"] = df["pfx_x"].fillna(0)
-    features["pfx_z"] = df["pfx_z"].fillna(0)
+    features["release_speed"] = _safe_col(df, "release_speed", use_median=True)
+    features["effective_speed"] = _safe_col(df, "effective_speed",
+                                            fill=features["release_speed"].median())
+    features["pfx_x"] = _safe_col(df, "pfx_x")
+    features["pfx_z"] = _safe_col(df, "pfx_z")
     features["total_movement"] = np.sqrt(features["pfx_x"]**2 + features["pfx_z"]**2)
-    features["release_spin"] = df["release_spin_rate"].fillna(
-        df["release_spin_rate"].median())
-    features["plate_x"] = df["plate_x"].fillna(0)
-    features["plate_z"] = df["plate_z"].fillna(0)
-    features["in_zone"] = df["zone"].fillna(0).apply(lambda z: 1 if 1 <= z <= 9 else 0)
-    features["release_ext"] = df["release_extension"].fillna(
-        df["release_extension"].median())
-    if "arm_angle" in df.columns:
-        features["arm_angle"] = df["arm_angle"].fillna(df["arm_angle"].median())
-    else:
-        features["arm_angle"] = 0
+    features["release_spin"] = _safe_col(df, "release_spin_rate", use_median=True)
+    features["plate_x"] = _safe_col(df, "plate_x")
+    features["plate_z"] = _safe_col(df, "plate_z")
+    features["in_zone"] = _safe_col(df, "zone").apply(
+        lambda z: 1 if 1 <= z <= 9 else 0)
+    features["release_ext"] = _safe_col(df, "release_extension", use_median=True)
+    features["arm_angle"] = _safe_col(df, "arm_angle", use_median=True)
 
     # --- Batted ball quality ---
-    features["launch_speed"] = df["launch_speed"].fillna(0)
-    features["launch_angle"] = df["launch_angle"].fillna(0)
-    features["hit_distance"] = df["hit_distance_sc"].fillna(0)
-    features["xwoba"] = df["estimated_woba_using_speedangle"].fillna(0)
-    features["xba"] = df["estimated_ba_using_speedangle"].fillna(0)
-    features["xslg"] = df["estimated_slg_using_speedangle"].fillna(0)
-    features["woba_value"] = df["woba_value"].fillna(0)
+    features["launch_speed"] = _safe_col(df, "launch_speed")
+    features["launch_angle"] = _safe_col(df, "launch_angle")
+    features["hit_distance"] = _safe_col(df, "hit_distance_sc")
+    features["xwoba"] = _safe_col(df, "estimated_woba_using_speedangle")
+    features["xba"] = _safe_col(df, "estimated_ba_using_speedangle")
+    features["xslg"] = _safe_col(df, "estimated_slg_using_speedangle")
+    features["woba_value"] = _safe_col(df, "woba_value")
 
     # Barrel proxy: launch_speed >= 98 and 26 <= launch_angle <= 30
     features["barrel"] = (
@@ -173,13 +192,13 @@ def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     ).astype(int)
 
     # --- Bat tracking (2024+ only, 0 for earlier years) ---
-    features["bat_speed"] = df["bat_speed"].fillna(0) if "bat_speed" in df.columns else 0
-    features["swing_length"] = df["swing_length"].fillna(0) if "swing_length" in df.columns else 0
-    features["attack_angle_bat"] = df["attack_angle"].fillna(0) if "attack_angle" in df.columns else 0
+    features["bat_speed"] = _safe_col(df, "bat_speed")
+    features["swing_length"] = _safe_col(df, "swing_length")
+    features["attack_angle_bat"] = _safe_col(df, "attack_angle")
 
     # --- Lineup / fatigue ---
-    features["n_thruorder"] = df["n_thruorder_pitcher"].fillna(1)
-    features["n_priorpa"] = df["n_priorpa_thisgame_player_at_bat"].fillna(0)
+    features["n_thruorder"] = _safe_col(df, "n_thruorder_pitcher", fill=1)
+    features["n_priorpa"] = _safe_col(df, "n_priorpa_thisgame_player_at_bat")
 
     # --- Nonlinear ---
     features["score_diff_sq"] = features["score_diff"] ** 2
