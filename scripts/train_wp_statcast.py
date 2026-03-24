@@ -507,25 +507,15 @@ def main():
 
         q_preds = np.clip(q_model.predict(X_test), 0.001, 0.999)
 
-        # Coverage check
-        if alpha < 0.5:
-            below = (y_test <= q_preds).mean()
-            print(f"  q={alpha:.2f}: mean={q_preds.mean():.4f}, "
-                  f"P(y <= q)={below:.4f} (target {alpha:.2f}), "
-                  f"iters={q_model.best_iteration}")
-        elif alpha > 0.5:
-            above = (y_test >= q_preds).mean()
-            coverage = 1 - above + (y_test <= np.clip(
-                lgb.Booster(model_file=str(output_dir / f"wp_statcast_q{quantile_alphas[0]:.2f}.txt")).predict(X_test)
-                if (output_dir / f"wp_statcast_q{quantile_alphas[0]:.2f}.txt").exists()
-                else q_preds, 0.001, 0.999)).mean()
-            print(f"  q={alpha:.2f}: mean={q_preds.mean():.4f}, "
-                  f"iters={q_model.best_iteration}")
-        else:
+        # Per-quantile diagnostics
+        if alpha == 0.50:
             q_brier = float(np.mean((q_preds - y_test) ** 2))
             print(f"  q={alpha:.2f} (median): mean={q_preds.mean():.4f}, "
                   f"Brier={q_brier:.6f}, iters={q_model.best_iteration}")
             quantile_results["median_brier"] = round(q_brier, 6)
+        else:
+            print(f"  q={alpha:.2f}: mean={q_preds.mean():.4f}, "
+                  f"iters={q_model.best_iteration}")
 
         # Save model
         q_path = output_dir / f"wp_statcast_q{alpha:.2f}.txt"
