@@ -36,6 +36,15 @@ FEATURE_NAMES = [
     "launch_speed", "launch_angle", "hit_distance",
     "xwoba", "xba", "xslg", "woba_value",
     "barrel", "bat_speed", "swing_length", "attack_angle_bat",
+    # v2: additional stats from full BQ
+    "babip_value", "iso_value", "delta_run_exp", "delta_pitcher_run_exp",
+    "age_bat", "age_pit",
+    "hit_location",
+    "sz_top", "sz_bot", "sz_height", "plate_z_norm",
+    "spin_axis",
+    "release_pos_x", "release_pos_z",
+    "vx0", "vz0", "ax", "az",
+    # lineup/fatigue + nonlinear + park + clipped
     "n_thruorder", "n_priorpa",
     "score_diff_sq", "inning_sq", "speed_sq", "launch_speed_sq",
     "park_factor", "park_hr_factor",
