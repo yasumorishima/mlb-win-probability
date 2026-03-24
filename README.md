@@ -407,21 +407,17 @@ gh workflow run "Validate WP Model" \
 - [x] **LightGBM Optuna 50 trial 完了（Brier 0.1544、ベンチマーク比 +1.90%）**
 - [x] **ランタイムエンジン実装（`win_probability_statcast.py`）**
 - [x] **MLB Stats API から投球・打球データ取得（リアルタイム + リプレイ対応）**
+- [x] **Conformal Prediction（2024 ホールドアウト 182K plays、90%/95% 信用区間）**
 - [ ] Streamlit アプリ統合（リプレイ + ライブ表示）
-- [ ] CatBoost 追加 → Statcast アンサンブル
 
-### Phase 2c: Bayesian Hierarchical Model 🔄（現在）
-- [x] NumPyro SVI 学習スクリプト（`train_wp_bayesian.py`）
-- [x] ランタイムエンジン（`win_probability_bayesian.py`、点推定 + 90% 信用区間）
-- [x] アンサンブル統合（`ensemble_wp.py` に `predict_bayesian()` 追加）
-- [x] GitHub Actions ワークフロー（`Train Bayesian WP Model`）
-- [x] Streamlit 信用区間バー表示（WP ゲージ下に 90% CI バンド）
-- [x] タイムアウト対策（ベクトル化 117 倍高速化 + 早期停止）
-- [x] 初回学習完走（Brier 0.1650 — Markov 比 -1.96%、改善ならず）
-- [x] バグ修正: season index ミスマッチ（test が 2015 の効果を使用していた）+ prior 境界張り付き解消
-- [ ] **修正後の再学習結果待ち**（prior 拡大 + season idx 修正 + 診断ログ追加）
-- [ ] チーム力ランキング・球場効果の検証
-- [ ] 本番アンサンブルへの組み込み（5 エンジン構成）
+### Phase 2c: Statcast ベイズ + アンサンブル 🔄（現在）
+- [x] ~~旧: NumPyro 階層モデル（game-state のみ）→ Brier 0.1648、Statcast 未使用のため不採用~~
+- [x] NGBoost（Statcast 58 特徴量でベイズ学習）追加 — LightGBM と同一パイプライン
+- [x] アンサンブル学習ワークフロー（`Train Ensemble WP`、inverse-Brier 加重平均 + Isotonic 補正）
+- [x] Streamlit エンジン比較セクション（v1 / Statcast / Ensemble 並列表示）
+- [ ] **NGBoost 初回学習結果待ち**（Run 23471927901）
+- [ ] NGBoost ランタイムエンジン実装 + アンサンブル組み込み
+- [ ] 本番アンサンブル確定（最良エンジン構成を決定）
 
 ### Phase 3: AI Commentary 🔄（現在）
 - [x] Gemini 2.5 Flash 解説生成（`/wp/commentary` エンドポイント）
