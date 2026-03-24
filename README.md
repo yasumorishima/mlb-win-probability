@@ -166,7 +166,7 @@ Available scenarios: `ninth_inning_drama`, `game_start`, `rally_7th`, `tied_8th`
 - **v1**: Normal 近似 + Optuna 最適化（5 パラメータ）
 - **v2**: 実データ WP テーブル（10 年分）+ Markov Chain フォールバック
 - **LightGBM (state)**: 勾配ブースティング（25 特徴量）
-- **LightGBM (Statcast)**: 58 特徴量、Brier 0.1544（ベンチマーク比 +1.90%）
+- **LightGBM (Statcast + FG + Fielding)**: 165 特徴量（58 → 165 拡張、学習中）、58 特徴量版 Brier 0.1544（ベンチマーク比 +1.90%）
 - **Bayesian Hierarchical**: Statcast LightGBM ベース + チーム力・球場・時代効果 + 90% 信用区間
 
 アンサンブルで統合し、Isotonic Regression でキャリブレーション補正。
@@ -285,10 +285,10 @@ export WANDB_API_KEY="your-wandb-key"
 | `mlb_statcast.raw_park_factors` | 329 | 球場パークファクター（savant-extras） |
 | `mlb_wp.fg_batting_stats` | ~5,300 | **FanGraphs 打者シーズン成績**（wRC+/選球眼/打球傾向/走塁/WAR 等 40+ 指標、2015-2024） |
 | `mlb_wp.fg_pitching_stats` | ~4,300 | **FanGraphs 投手シーズン成績**（Stuff+/SIERA/ERA-/ゾーン制球/WAR 等 45+ 指標、2015-2024） |
-| `mlb_wp.statcast_sprint_speed` | — | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2015-2024） |
-| `mlb_wp.statcast_oaa` | — | **Statcast OAA**（7 ポジション別 Outs Above Average、2016-2024） |
-| `mlb_wp.statcast_team_oaa` | — | **チーム OAA 集計**（チーム×シーズン別の合計/平均 OAA） |
-| `mlb_wp.statcast_catcher` | — | **Statcast 捕手能力**（pop time、arm strength、exchange time、2015-2024） |
+| `mlb_wp.statcast_sprint_speed` | 4,975 | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2016-2024） |
+| `mlb_wp.statcast_oaa` | 2,428 | **Statcast OAA**（7 ポジション別 Outs Above Average、2016-2024） |
+| `mlb_wp.statcast_team_oaa` | 270 | **チーム OAA 集計**（チーム×シーズン別の合計/平均 OAA） |
+| `mlb_wp.statcast_catcher` | 702 | **Statcast 捕手能力**（pop time、arm strength、exchange time、2016-2024） |
 
 Statcast データは pybaseball 全 118 カラム + computed 4 = **122 カラム**を保持（投球速度・変化量・打球速度・発射角度・xwOBA・バットトラッキング・選手年齢・ストライクゾーン・リリースポイント・投球軌道・MLB ベンチマーク WP 等）。WP モデル学習時は**打席結果のみ（`events IS NOT NULL`）**に絞り、約 172 万行で学習。
 
@@ -429,7 +429,11 @@ gh workflow run "Validate WP Model" \
 - [x] **76 特徴量に拡張**（babip/iso/delta_run_exp/age/sz/spin_axis/release_pos/trajectory 追加）
 - [x] **FanGraphs 全指標統合（165 特徴量）** — 投手 46 指標（Stuff+/SIERA/ERA-/ゾーン制球等）+ 打者 35 指標（wRC+/選球眼/打球傾向/走塁/WAR 等）を BQ マスタ経由で投球単位データに join
 - [x] **走塁・守備マスタ統合（165 特徴量）** — Statcast sprint speed（打者走力）+ OAA チーム集計（守備力）+ catcher pop time/arm strength（捕手能力）追加
-- [ ] **165 特徴量 Statcast+FG+Fielding + Bayesian + Ensemble 学習・評価**
+- [x] **走塁・守備 BQ ロード + カバレッジ検証完了** — sprint 87.2% / team OAA 83.3% / catcher 86.0%（2015 はデータなし、2016-2024 は 93-99%）
+- [ ] **165 特徴量 Statcast+FG+Fielding モデル学習中** ← 現在ここ
+- [ ] Conformal Prediction 再計算
+- [ ] Bayesian（Statcast base + 階層）学習
+- [ ] Ensemble（v1+v2+Statcast+Bayesian）学習
 - [ ] 本番アンサンブル確定（最良エンジン構成を決定）
 
 ### Phase 3: AI Commentary 🔄（現在）
