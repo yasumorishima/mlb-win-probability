@@ -24,13 +24,14 @@
 ESPN / FanGraphs にない独自機能：**WP に不確実性の幅（信用区間）がつく**。
 
 ```
-logit(WP) = logit(MarkovWP)              ← ゲーム状態の骨格（v2 由来）
+logit(WP) = logit(StatcastLGBM_pred)     ← Statcast 58 特徴量 LightGBM 予測値
            + α_home - α_away              ← チーム力（階層事前分布、30 チーム）
            + β_park                        ← 球場効果（ベイズ縮小推定）
            + γ_season                      ← 時代効果（ランダムウォーク、2015–2024）
            + κ × LI × (α_home - α_away)   ← レバレッジ × チーム力交互作用
 ```
 
+- **Bayesian stacking**: LightGBM が投球・打球・バットトラッキング等 58 特徴量を処理、ベイズ層がチーム力・球場・時代効果 + 不確実性を上乗せ
 - 同じゲーム状態でもヤンキース vs オリオールズとオリオールズ vs ヤンキースで WP が異なる
 - クアーズフィールドの球場効果が過学習なく反映される
 - 序盤は幅広い信用区間 → 終盤は収束（レバレッジに応じた不確実性表現）
@@ -409,13 +410,15 @@ gh workflow run "Validate WP Model" \
 - [x] **Conformal Prediction（2024 ホールドアウト 182K plays、90% coverage 90.01%）**
 - [ ] Streamlit アプリ統合（リプレイ + ライブ表示）
 
-### Phase 2c: Statcast 予測区間 + アンサンブル ✅
+### Phase 2c: Statcast 予測区間 + アンサンブル + Bayesian 統合 🔄（現在）
 - [x] ~~NumPyro 階層モデル（game-state のみ）→ Brier 0.1648、Statcast 未使用のため不採用~~
 - [x] ~~NGBoost Bernoulli → 二値分類では p(1-p) しか出ず認識論的不確実性なし~~
 - [x] ~~Quantile Regression LightGBM → 二値ターゲット（0/1）では分位点が 0 or 1 に収束、不適合~~
 - [x] **Conformal Prediction 正式採用**（Split Conformal、2024 ホールドアウト 182K plays、90% coverage 90.01%）
 - [x] **アンサンブル**（v1+v2+Statcast、inverse-Brier 加重、Brier 0.1609、`Train Ensemble WP` ワークフロー）
 - [x] Streamlit エンジン比較セクション（v1 / Statcast / Ensemble + 90% 区間表示）
+- [x] **Bayesian + Statcast 統合**（Statcast LightGBM 予測をベースに階層ベイズ上乗せ）
+- [ ] **Bayesian + Statcast 初回学習結果待ち**
 - [ ] 本番アンサンブル確定（最良エンジン構成を決定）
 
 ### Phase 3: AI Commentary 🔄（現在）

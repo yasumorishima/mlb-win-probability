@@ -34,7 +34,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install numpyro jax jaxlib numpy scipy pandas google-cloud-bigquery pyarrow db-dtypes
+          pip install numpyro jax jaxlib numpy scipy pandas google-cloud-bigquery pyarrow db-dtypes lightgbm
 
       - name: Authenticate GCP
         env:
@@ -49,6 +49,27 @@ jobs:
         run: |
           python scripts/export_from_bq.py --output-dir data/
 
+      - name: Download Statcast LightGBM model
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Downloading latest Statcast model artifact..."
+          mkdir -p data/
+          # Get latest successful statcast-wp-results artifact
+          RUN_ID=$(gh run list --workflow="Train Statcast WP Model" \
+            --status=success --limit=1 --json databaseId -q '.[0].databaseId' || true)
+          if [ -n "$RUN_ID" ]; then
+            gh run download "$RUN_ID" --name statcast-wp-results --dir /tmp/statcast-artifact/ || true
+            if [ -f /tmp/statcast-artifact/wp_statcast_lgbm.txt ]; then
+              cp /tmp/statcast-artifact/wp_statcast_lgbm.txt data/
+              echo "Statcast model downloaded successfully"
+            else
+              echo "WARNING: Statcast model not found in artifact, will use Markov fallback"
+            fi
+          else
+            echo "WARNING: No successful Statcast WP run found, will use Markov fallback"
+          fi
+
       - name: Train Bayesian WP model
         run: |
           python scripts/train_wp_bayesian.py \
@@ -56,7 +77,8 @@ jobs:
             --output-dir results/ \
             --test-year ${{ inputs.test_year }} \
             --n-steps ${{ inputs.n_steps }} \
-            --lr ${{ inputs.lr }}
+            --lr ${{ inputs.lr }} \
+            --statcast-model data/wp_statcast_lgbm.txt
 
       - name: Upload results
         if: always()
@@ -78,20 +100,21 @@ jobs:
             python -c "
           import json
           r = json.load(open('results/bayesian_results.json'))
-          markov = r['markov_baseline']['brier']
+          base_type = r.get('baseline_type', 'Markov_v1')
+          base = r['baseline']['brier']
           bayes = r['bayesian']['brier']
           bss = r['bayesian']['brier_skill']
           ece = r['bayesian']['ece']
-          imp = r['improvement_vs_markov_pct']
+          imp = r['improvement_vs_baseline_pct']
           ci = r['bayesian'].get('ci_width_mean', 'N/A')
           print('| Metric | Value |')
           print('|--------|-------|')
-          print(f'| Markov Baseline Brier | {markov} |')
+          print(f'| Baseline ({base_type}) Brier | {base} |')
           print(f'| **Bayesian Brier** | **{bayes}** |')
           print(f'| Brier Skill Score | {bss} |')
           print(f'| ECE | {ece} |')
           print(f'| Mean 90% CI Width | {ci} |')
-          print(f'| **vs Markov** | **{imp:+.2f}%** |')
+          print(f'| **vs {base_type}** | **{imp:+.2f}%** |')
           print(f'| ELBO (final) | {r[\"final_elbo_loss\"]} |')
           " >> $GITHUB_STEP_SUMMARY
           fi
@@ -132,10 +155,11 @@ jobs:
             METRICS=$(python -c "
           import json
           r = json.load(open('results/bayesian_results.json'))
+          base_type = r.get('baseline_type', 'Markov_v1')
           bayes = r['bayesian']['brier']
-          imp = r['improvement_vs_markov_pct']
+          imp = r['improvement_vs_baseline_pct']
           ci = r['bayesian'].get('ci_width_mean', 'N/A')
-          print(f'Brier: {bayes:.6f} ({imp:+.2f}% vs Markov) | CI width: {ci} | Steps: {r[\"n_steps\"]}')
+          print(f'Brier: {bayes:.6f} ({imp:+.2f}% vs {base_type}) | CI width: {ci} | Steps: {r[\"n_steps\"]}')
           ")
             BODY="**Bayesian WP Model** ✅ ${METRICS} | ${RUN_URL}"
           else

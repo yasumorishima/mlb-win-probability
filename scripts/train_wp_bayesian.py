@@ -2,13 +2,16 @@
 Bayesian Hierarchical Win Probability Model (NumPyro SVI).
 
 Architecture:
-  logit(WP_i) = logit(MarkovWP_i)              # game-state skeleton from v2
+  logit(WP_i) = logit(StatcastLGBM_pred_i)     # Statcast 58-feature LightGBM base
               + α_home[i] - α_away[i]           # team strength (hierarchical)
               + β_park[i]                        # park effect (hierarchical)
               + γ_season[i]                      # era effect (random walk)
               + κ × LI_i × (α_home - α_away)    # leverage × team interaction
 
-Key innovations over v1/v2/LightGBM:
+Bayesian stacking: LightGBM handles 58 Statcast features (pitch/hit/bat tracking),
+Bayesian layer adds team/park/season effects + posterior credible intervals.
+
+Key innovations:
   1. Same game state, different teams → different WP
   2. Park effects with Bayesian shrinkage (no overfitting)
   3. Posterior credible intervals on every WP estimate
@@ -199,8 +202,81 @@ def compute_leverage_index(inning: int, half: str, outs: int,
     return max(0.1, min(li, 5.0))
 
 
+def _compute_statcast_base_wp(states: list[dict],
+                               statcast_model_path: Path | None = None,
+                               ) -> np.ndarray | None:
+    """Compute base WP using Statcast LightGBM model (batch prediction).
+
+    Returns predicted WP array, or None if model not available.
+    """
+    if statcast_model_path is None or not statcast_model_path.exists():
+        return None
+
+    try:
+        import lightgbm as lgb
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from win_probability_statcast import WPEngineStatcast, FEATURE_NAMES
+
+        model = lgb.Booster(model_file=str(statcast_model_path))
+        if model.num_feature() != len(FEATURE_NAMES):
+            print(f"  WARNING: Statcast model has {model.num_feature()} features, "
+                  f"expected {len(FEATURE_NAMES)}")
+            return None
+
+        # Build feature vectors using WPEngineStatcast's feature builder
+        engine = WPEngineStatcast.__new__(WPEngineStatcast)
+        features = []
+        for s in states:
+            gs = {
+                "inning": s["inning"],
+                "top_bottom": "bottom" if s["half_inning"] == "bottom" else "top",
+                "outs": s["outs"],
+                "runners": (s["r1"], s["r2"], s["r3"]),
+                "score_diff": s["score_diff"],
+                "balls": 0, "strikes": 0,
+            }
+            features.append(engine._build_features(gs, None, None))
+
+        X = np.array(features, dtype=np.float32)
+        preds = np.clip(model.predict(X), 0.005, 0.995).astype(np.float32)
+        print(f"  Statcast LightGBM base: mean={preds.mean():.4f}, "
+              f"std={preds.std():.4f}")
+        return preds
+
+    except ImportError:
+        print("  LightGBM not installed, falling back to Markov WP")
+        return None
+    except Exception as e:
+        print(f"  Statcast model load failed: {e}, falling back to Markov WP")
+        return None
+
+
+def _compute_markov_wp(inning, is_bottom, outs, r1, r2, r3, score_diff):
+    """Vectorized Markov WP computation (fallback when Statcast model unavailable)."""
+    runs_per_game = 4.5
+    rphi = runs_per_game / 18.0
+
+    home_hi = np.where(is_bottom,
+                       np.maximum(0, 18 - 2 * inning),
+                       np.maximum(0, 18 - 2 * inning + 1))
+    away_hi = home_hi.copy()
+    outs_frac = 1.0 - outs / 3.0
+    runner_re = r1 * 0.37 + r2 * 0.70 + r3 * 1.00
+    runner_re = np.where(is_bottom, runner_re, -runner_re)
+    mean_diff = score_diff + runner_re
+    var = rphi * (home_hi + away_hi + outs_frac) * 1.3
+
+    return np.where(
+        var <= 0,
+        np.where(mean_diff > 0, 0.99, np.where(mean_diff < 0, 0.01, 0.52)),
+        np.clip(_ndtr(mean_diff / np.sqrt(np.maximum(var, 1e-10))),
+                0.005, 0.995)
+    ).astype(np.float32)
+
+
 def prepare_arrays(states: list[dict],
                     year_to_idx: dict[int, int] | None = None,
+                    statcast_model_path: Path | None = None,
                     ) -> dict[str, np.ndarray]:
     """Convert play states to numpy arrays for NumPyro (vectorized).
 
@@ -209,6 +285,9 @@ def prepare_arrays(states: list[dict],
         year_to_idx: If provided, use this mapping for season indices.
             For test sets, pass the train's mapping so season effects align.
             Years not in the mapping use the last index (extrapolation).
+        statcast_model_path: Path to Statcast LightGBM model file.
+            If provided and valid, uses Statcast predictions as base WP.
+            Falls back to Markov WP if unavailable.
     """
     n = len(states)
     if year_to_idx is None:
@@ -236,30 +315,14 @@ def prepare_arrays(states: list[dict],
         dtype=np.int32)
     y = np.array([s["home_won"] for s in states], dtype=np.float32)
 
-    # --- Vectorized Markov WP ---
-    runs_per_game = 4.5
-    rphi = runs_per_game / 18.0
+    # --- Base WP: Statcast LightGBM (preferred) or Markov (fallback) ---
+    base_wp = _compute_statcast_base_wp(states, statcast_model_path)
+    use_statcast = base_wp is not None
 
-    # Remaining half-innings (top/bottom differ by 1)
-    home_hi = np.where(is_bottom,
-                       np.maximum(0, 18 - 2 * inning),
-                       np.maximum(0, 18 - 2 * inning + 1))
-    away_hi = home_hi.copy()
-
-    outs_frac = 1.0 - outs / 3.0
-
-    runner_re = r1 * 0.37 + r2 * 0.70 + r3 * 1.00
-    runner_re = np.where(is_bottom, runner_re, -runner_re)
-
-    mean_diff = score_diff + runner_re
-    var = rphi * (home_hi + away_hi + outs_frac) * 1.3
-
-    markov_wp = np.where(
-        var <= 0,
-        np.where(mean_diff > 0, 0.99, np.where(mean_diff < 0, 0.01, 0.52)),
-        np.clip(_ndtr(mean_diff / np.sqrt(np.maximum(var, 1e-10))),
-                0.005, 0.995)
-    ).astype(np.float32)
+    if base_wp is None:
+        print("  Using Markov WP as base (Statcast model not available)")
+        base_wp = _compute_markov_wp(inning, is_bottom, outs,
+                                      r1, r2, r3, score_diff)
 
     # --- Vectorized Leverage Index ---
     inn_factor = np.minimum(inning / 9.0, 1.5)
@@ -276,8 +339,8 @@ def prepare_arrays(states: list[dict],
         (inning >= 9) & is_bottom & (abs_diff <= 1), leverage * 2.0, leverage)
     leverage = np.clip(leverage, 0.1, 5.0).astype(np.float32)
 
-    # Logit transform of Markov WP
-    wp_clipped = np.clip(markov_wp, 0.005, 0.995)
+    # Logit transform of base WP
+    wp_clipped = np.clip(base_wp, 0.005, 0.995)
     logit_wp = np.log(wp_clipped / (1 - wp_clipped))
 
     # Normalize leverage
@@ -286,7 +349,7 @@ def prepare_arrays(states: list[dict],
     leverage_norm = (leverage - li_mean) / li_std
 
     return {
-        "logit_markov_wp": logit_wp.astype(np.float32),
+        "logit_base_wp": logit_wp.astype(np.float32),
         "leverage": leverage.astype(np.float32),
         "leverage_norm": leverage_norm.astype(np.float32),
         "home_idx": home_idx,
@@ -295,7 +358,8 @@ def prepare_arrays(states: list[dict],
         "y": y,
         "n_seasons": len(years),
         "years": years,
-        "markov_wp": markov_wp,
+        "base_wp": base_wp,
+        "use_statcast": use_statcast,
         "leverage_mean": float(li_mean),
         "leverage_std": float(li_std),
     }
@@ -305,7 +369,7 @@ def prepare_arrays(states: list[dict],
 # NumPyro Model
 # ============================================================
 
-def bayesian_wp_model(logit_markov_wp, leverage_norm,
+def bayesian_wp_model(logit_base_wp, leverage_norm,
                       home_idx, away_idx, season_idx,
                       n_teams, n_seasons, y=None):
     """Bayesian hierarchical WP model.
@@ -315,9 +379,11 @@ def bayesian_wp_model(logit_markov_wp, leverage_norm,
       2. Each park (=home team) has an effect β ~ Normal(0, σ_park)
       3. Season effects follow a random walk γ_t = γ_{t-1} + ε, ε ~ Normal(0, σ_season)
       4. Leverage-team interaction: strong teams capitalize more in clutch
-      5. WP = sigmoid(logit_markov + home_strength - away_strength + park + season + interaction)
+      5. WP = sigmoid(logit_base + home_strength - away_strength + park + season + interaction)
+
+    logit_base_wp: logit of Statcast LightGBM predictions (or Markov WP fallback)
     """
-    n_obs = logit_markov_wp.shape[0]
+    n_obs = logit_base_wp.shape[0]
 
     # --- Hyperpriors ---
     # Priors must be wide enough that posteriors don't hit the boundary.
@@ -327,7 +393,7 @@ def bayesian_wp_model(logit_markov_wp, leverage_norm,
     sigma_season = numpyro.sample("sigma_season", dist.HalfNormal(0.5))
 
     # --- Team strengths (non-centered parameterization) ---
-    # Zero-sum: the league average is already in the Markov baseline
+    # Zero-sum: the league average is already in the base WP
     team_raw = numpyro.sample("team_raw",
                                dist.Normal(0, 1).expand([n_teams]))
     team_strength = numpyro.deterministic(
@@ -359,14 +425,14 @@ def bayesian_wp_model(logit_markov_wp, leverage_norm,
     kappa = numpyro.sample("kappa", dist.Normal(0, 0.2))
 
     # --- Home field advantage correction ---
-    # Markov baseline assumes average HFA; this learns the residual
+    # Base WP assumes average HFA; this learns the residual
     hfa_correction = numpyro.sample("hfa_correction", dist.Normal(0, 0.1))
 
     # --- Linear predictor ---
     team_diff = team_strength[home_idx] - team_strength[away_idx]
 
     logit_wp = (
-        logit_markov_wp
+        logit_base_wp
         + team_diff
         + park_effect[home_idx]
         + season_effect[season_idx]
@@ -401,7 +467,7 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
 
     # Convert to JAX arrays once (avoid re-conversion every step)
     jax_arrays = {
-        "logit_markov_wp": jnp.array(arrays["logit_markov_wp"]),
+        "logit_base_wp": jnp.array(arrays["logit_base_wp"]),
         "leverage_norm": jnp.array(arrays["leverage_norm"]),
         "home_idx": jnp.array(arrays["home_idx"]),
         "away_idx": jnp.array(arrays["away_idx"]),
@@ -412,7 +478,7 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
     # Initialize
     svi_state = svi.init(
         rng_key,
-        logit_markov_wp=jax_arrays["logit_markov_wp"],
+        logit_base_wp=jax_arrays["logit_base_wp"],
         leverage_norm=jax_arrays["leverage_norm"],
         home_idx=jax_arrays["home_idx"],
         away_idx=jax_arrays["away_idx"],
@@ -430,7 +496,7 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
     for step in range(n_steps):
         svi_state, loss = svi.update(
             svi_state,
-            logit_markov_wp=jax_arrays["logit_markov_wp"],
+            logit_base_wp=jax_arrays["logit_base_wp"],
             leverage_norm=jax_arrays["leverage_norm"],
             home_idx=jax_arrays["home_idx"],
             away_idx=jax_arrays["away_idx"],
@@ -491,7 +557,7 @@ def train_svi(arrays: dict, n_steps: int = 20000, lr: float = 0.005,
 
     posterior_samples = predictive(
         pred_key,
-        logit_markov_wp=jax_arrays["logit_markov_wp"][:1],
+        logit_base_wp=jax_arrays["logit_base_wp"][:1],
         leverage_norm=jax_arrays["leverage_norm"][:1],
         home_idx=jax_arrays["home_idx"][:1],
         away_idx=jax_arrays["away_idx"][:1],
@@ -517,7 +583,7 @@ def predict_with_uncertainty(arrays: dict, posterior: dict,
     Returns: (mean_wp, lower_5, upper_95)
     """
     n_samples = len(posterior["team_strength"])
-    n_obs = len(arrays["logit_markov_wp"])
+    n_obs = len(arrays["logit_base_wp"])
 
     team_strength = np.array(posterior["team_strength"])  # (n_samples, n_teams)
     park_effect = np.array(posterior["park_effect"])       # (n_samples, n_teams)
@@ -525,7 +591,7 @@ def predict_with_uncertainty(arrays: dict, posterior: dict,
     kappa = np.array(posterior["kappa"])                   # (n_samples,)
     hfa_corr = np.array(posterior["hfa_correction"])       # (n_samples,)
 
-    logit_base = arrays["logit_markov_wp"]
+    logit_base = arrays["logit_base_wp"]
     lev_norm = arrays["leverage_norm"]
     h_idx = arrays["home_idx"]
     a_idx = arrays["away_idx"]
@@ -610,6 +676,8 @@ def main():
     parser.add_argument("--lr", type=float, default=0.005,
                         help="Learning rate for Adam optimizer")
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--statcast-model", default=None,
+                        help="Path to Statcast LightGBM model (wp_statcast_lgbm.txt)")
     args = parser.parse_args()
 
     data_dir = Path(args.data_dir)
@@ -642,12 +710,30 @@ def main():
     print("Preparing features")
     print("=" * 60)
 
-    train_arrays = prepare_arrays(train_states)
+    # Resolve Statcast model path
+    statcast_path = None
+    if args.statcast_model:
+        statcast_path = Path(args.statcast_model)
+    else:
+        # Auto-detect: check data/ directory
+        for candidate in [data_dir / "wp_statcast_lgbm.txt",
+                          Path(__file__).parent.parent / "data" / "wp_statcast_lgbm.txt"]:
+            if candidate.exists():
+                statcast_path = candidate
+                break
+    if statcast_path and statcast_path.exists():
+        print(f"  Statcast model: {statcast_path}")
+    else:
+        print("  Statcast model not found, will use Markov WP fallback")
+
+    train_arrays = prepare_arrays(train_states,
+                                   statcast_model_path=statcast_path)
 
     # Test uses train's year_to_idx so season effects align correctly.
     # 2024 (test year) maps to last season index (extrapolation from 2023).
     train_year_to_idx = {y: i for i, y in enumerate(train_arrays["years"])}
-    test_arrays = prepare_arrays(test_states, year_to_idx=train_year_to_idx)
+    test_arrays = prepare_arrays(test_states, year_to_idx=train_year_to_idx,
+                                  statcast_model_path=statcast_path)
 
     # Use train normalization for test leverage
     test_arrays["leverage_norm"] = (
@@ -676,13 +762,14 @@ def main():
           f"= extrapolate from {train_arrays['years'][-1]})")
 
     # -------------------------------------------------------
-    # Markov baseline (on test set)
+    # Baseline (on test set)
     # -------------------------------------------------------
     print(f"\n{'=' * 60}")
-    print("BASELINE: Markov WP (v1 approximation)")
+    base_label = "Statcast_LightGBM" if test_arrays["use_statcast"] else "Markov_v1"
+    print(f"BASELINE: {base_label}")
     print("=" * 60)
-    markov_test_wp = test_arrays["markov_wp"]
-    markov_metrics = evaluate(markov_test_wp, test_arrays["y"], "Markov_v1")
+    base_test_wp = test_arrays["base_wp"]
+    base_metrics = evaluate(base_test_wp, test_arrays["y"], base_label)
 
     # -------------------------------------------------------
     # Train Bayesian model
@@ -776,12 +863,12 @@ def main():
     print("COMPARISON")
     print("=" * 60)
 
-    markov_brier = markov_metrics["brier"]
+    base_brier = base_metrics["brier"]
     bayes_brier = bayes_metrics["brier"]
-    improvement = (markov_brier - bayes_brier) / markov_brier * 100
-    print(f"  Markov (v1):     Brier = {markov_brier:.6f}")
+    improvement = (base_brier - bayes_brier) / base_brier * 100
+    print(f"  {base_label}:  Brier = {base_brier:.6f}")
     print(f"  Bayesian:        Brier = {bayes_brier:.6f} "
-          f"({improvement:+.2f}% vs Markov)")
+          f"({improvement:+.2f}% vs {base_label})")
 
     # -------------------------------------------------------
     # Save outputs
@@ -834,9 +921,10 @@ def main():
     results = {
         "test_year": args.test_year,
         "n_steps": args.n_steps,
-        "markov_baseline": markov_metrics,
+        "baseline": base_metrics,
+        "baseline_type": base_label,
         "bayesian": bayes_metrics,
-        "improvement_vs_markov_pct": round(improvement, 2),
+        "improvement_vs_baseline_pct": round(improvement, 2),
         "final_elbo_loss": round(float(np.mean(losses[-500:])), 2),
     }
     with open(results_path, "w") as f:
