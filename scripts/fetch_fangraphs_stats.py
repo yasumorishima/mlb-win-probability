@@ -208,6 +208,16 @@ def _map_to_mlbam(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _clean_col_names_for_bq(df: pd.DataFrame) -> pd.DataFrame:
+    """Clean column names for BQ compatibility (no /, %, +, spaces)."""
+    col_map = {}
+    for c in df.columns:
+        new = c.replace("/", "_").replace("%", "_pct").replace("+", "_plus")
+        new = new.replace(" ", "_").replace("-", "_")
+        col_map[c] = new
+    return df.rename(columns=col_map)
+
+
 def load_to_bq(df: pd.DataFrame, table_name: str):
     """Load DataFrame to BigQuery."""
     from google.cloud import bigquery
@@ -218,6 +228,9 @@ def load_to_bq(df: pd.DataFrame, table_name: str):
         key_path.write_text(sa_key)
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(key_path)
 
+    # Clean column names for BQ
+    df_bq = _clean_col_names_for_bq(df.copy())
+
     client = bigquery.Client(project=BQ_PROJECT)
     table_ref = f"{BQ_PROJECT}.{BQ_DATASET}.{table_name}"
 
@@ -226,7 +239,7 @@ def load_to_bq(df: pd.DataFrame, table_name: str):
         autodetect=True,
     )
 
-    job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
+    job = client.load_table_from_dataframe(df_bq, table_ref, job_config=job_config)
     job.result()
 
     table = client.get_table(table_ref)
