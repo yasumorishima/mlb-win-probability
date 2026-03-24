@@ -59,7 +59,7 @@ WP_COLUMNS = [
     "estimated_woba_using_speedangle",
     "babip_value", "iso_value",
     "woba_value", "woba_denom",
-    # Run/Win expectancy (MLB official — our benchmark)
+    # Run/Win expectancy (MLB home_win_exp — benchmark)
     "home_win_exp",
     "bat_win_exp",
     "delta_home_win_exp",

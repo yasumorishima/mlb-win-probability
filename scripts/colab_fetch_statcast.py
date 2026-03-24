@@ -60,7 +60,7 @@ WP_COLUMNS = [
     "estimated_slg_using_speedangle",
     "estimated_woba_using_speedangle",
     "woba_value", "woba_denom",
-    # Win expectancy (MLB official — benchmark)
+    # Win expectancy (MLB home_win_exp — benchmark)
     "home_win_exp", "bat_win_exp",
     "delta_home_win_exp", "delta_run_exp",
     # Zone

@@ -75,7 +75,7 @@ jobs:
           nf = r['n_features']
           print(f'| Metric | Value |')
           print(f'|--------|-------|')
-          print(f'| MLB Official Brier | {mlb} |')
+          print(f'| MLB Benchmark (home_win_exp) | {mlb} |')
           print(f'| LightGBM Brier | {lgbm} |')
           print(f'| Brier Skill Score | {bss} |')
           print(f'| ECE | {ece} |')

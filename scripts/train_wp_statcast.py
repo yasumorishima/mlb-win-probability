@@ -8,7 +8,7 @@ Uses 70+ features including:
 - Bat tracking (bat speed, swing length, attack angle)
 - Context (count, game phase, lineup position)
 
-Benchmark: MLB official home_win_exp (our model must beat this).
+Benchmark: MLB home_win_exp from Statcast API (our model must beat this).
 
 LightGBM + CatBoost + Optuna, same pipeline as baseball-mlops.
 
@@ -317,9 +317,9 @@ def main():
     print(f"  Train: {X_train.shape}")
     print(f"  Test: {X_test.shape}")
 
-    # MLB official WP as benchmark
+    # MLB home_win_exp as benchmark
     print(f"\n{'=' * 60}")
-    print("BENCHMARK: MLB Official home_win_exp")
+    print("BENCHMARK: MLB home_win_exp (Statcast API)")
     print(f"{'=' * 60}")
     mlb_wp = test_df["home_win_exp"].values
     mlb_valid = ~np.isnan(mlb_wp)
@@ -490,13 +490,13 @@ def main():
         results["mlb_official"] = mlb_metrics
         mlb_brier = mlb_metrics["brier"]
         lgbm_vs_mlb = (mlb_brier - lgbm_metrics["brier"]) / mlb_brier * 100
-        print(f"\n  LightGBM vs MLB official: {lgbm_vs_mlb:+.2f}% Brier")
+        print(f"\n  LightGBM vs MLB benchmark: {lgbm_vs_mlb:+.2f}% Brier")
 
     if cb_metrics:
         results["catboost"] = cb_metrics
         if mlb_metrics:
             cb_vs_mlb = (mlb_brier - cb_metrics["brier"]) / mlb_brier * 100
-            print(f"  CatBoost vs MLB official: {cb_vs_mlb:+.2f}% Brier")
+            print(f"  CatBoost vs MLB benchmark: {cb_vs_mlb:+.2f}% Brier")
 
     # Save
     results_path = output_dir / "wp_statcast_results.json"
