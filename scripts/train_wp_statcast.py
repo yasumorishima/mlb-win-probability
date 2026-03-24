@@ -196,6 +196,42 @@ def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     features["swing_length"] = _safe_col(df, "swing_length")
     features["attack_angle_bat"] = _safe_col(df, "attack_angle")
 
+    # --- Additional batting stats (new from full BQ) ---
+    features["babip_value"] = _safe_col(df, "babip_value")
+    features["iso_value"] = _safe_col(df, "iso_value")
+    features["delta_run_exp"] = _safe_col(df, "delta_run_exp")
+    features["delta_pitcher_run_exp"] = _safe_col(df, "delta_pitcher_run_exp")
+
+    # --- Player age ---
+    features["age_bat"] = _safe_col(df, "age_bat", use_median=True)
+    features["age_pit"] = _safe_col(df, "age_pit", use_median=True)
+
+    # --- Batted ball direction ---
+    features["hit_location"] = _safe_col(df, "hit_location")
+
+    # --- Strike zone geometry ---
+    features["sz_top"] = _safe_col(df, "sz_top", use_median=True)
+    features["sz_bot"] = _safe_col(df, "sz_bot", use_median=True)
+    features["sz_height"] = features["sz_top"] - features["sz_bot"]
+    features["plate_z_norm"] = np.where(
+        features["sz_height"] > 0,
+        (features["plate_z"] - features["sz_bot"]) / features["sz_height"],
+        0.5,
+    )
+
+    # --- Spin axis ---
+    features["spin_axis"] = _safe_col(df, "spin_axis", use_median=True)
+
+    # --- Release point ---
+    features["release_pos_x"] = _safe_col(df, "release_pos_x", use_median=True)
+    features["release_pos_z"] = _safe_col(df, "release_pos_z", use_median=True)
+
+    # --- Pitch trajectory ---
+    features["vx0"] = _safe_col(df, "vx0")
+    features["vz0"] = _safe_col(df, "vz0")
+    features["ax"] = _safe_col(df, "ax")
+    features["az"] = _safe_col(df, "az")
+
     # --- Lineup / fatigue ---
     features["n_thruorder"] = _safe_col(df, "n_thruorder_pitcher", fill=1)
     features["n_priorpa"] = _safe_col(df, "n_priorpa_thisgame_player_at_bat")

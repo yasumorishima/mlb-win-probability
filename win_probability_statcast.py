@@ -228,6 +228,53 @@ class WPEngineStatcast:
             barrel = 1 if (launch_speed >= 98
                            and 26 <= launch_angle <= 30) else 0
 
+        # Additional batting stats (from BQ, 0 in live)
+        babip_value = 0.0
+        iso_value = 0.0
+        delta_run_exp = 0.0
+        delta_pitcher_run_exp = 0.0
+
+        # Player age (not in live feed)
+        age_bat = gs.get("age_bat", 27.0)
+        age_pit = gs.get("age_pit", 27.0)
+
+        # Hit location (not in live feed)
+        hit_location = 0.0
+
+        # Strike zone geometry
+        sz_top = 3.4
+        sz_bot = 1.6
+        if pitch:
+            sz = pitch.get("strikeZone", {})
+            sz_top = _safe(sz, "top", 3.4)
+            sz_bot = _safe(sz, "bottom", 1.6)
+        sz_height = sz_top - sz_bot
+        plate_z_norm = ((plate_z - sz_bot) / sz_height) if sz_height > 0 else 0.5
+
+        # Spin axis
+        spin_axis = 0.0
+        if pitch:
+            spin_axis = _safe(pitch, "spinAxis", 0.0)
+
+        # Release point
+        release_pos_x = 0.0
+        release_pos_z = 0.0
+        if pitch:
+            coords = pitch.get("coordinates", {})
+            release_pos_x = _safe(coords, "releaseX", 0.0)
+            release_pos_z = _safe(coords, "releaseZ", 5.5)
+
+        # Pitch trajectory
+        vx0 = 0.0
+        vz0 = 0.0
+        ax_val = 0.0
+        az_val = 0.0
+        if pitch:
+            vx0 = _safe(pitch, "vX0", 0.0)
+            vz0 = _safe(pitch, "vZ0", 0.0)
+            ax_val = _safe(pitch, "aX", 0.0)
+            az_val = _safe(pitch, "aZ", 0.0)
+
         # Lineup/fatigue (not available from live feed, use defaults)
         n_thruorder = gs.get("n_thruorder", 1)
         n_priorpa = gs.get("n_priorpa", 0)
@@ -246,6 +293,7 @@ class WPEngineStatcast:
         score_capped = max(-10, min(10, score_diff))
         inning_capped = max(1, min(12, inning))
 
+        # Order MUST match engineer_features() in train_wp_statcast.py
         return [
             inning, is_bottom, outs, balls, strikes,
             score_diff, r1, r2, r3, total_runners,
@@ -259,6 +307,13 @@ class WPEngineStatcast:
             launch_speed, launch_angle, hit_distance,
             xwoba, xba, xslg, woba_value,
             barrel, bat_speed, swing_length, attack_angle,
+            babip_value, iso_value, delta_run_exp, delta_pitcher_run_exp,
+            age_bat, age_pit,
+            hit_location,
+            sz_top, sz_bot, sz_height, plate_z_norm,
+            spin_axis,
+            release_pos_x, release_pos_z,
+            vx0, vz0, ax_val, az_val,
             n_thruorder, n_priorpa,
             score_diff_sq, inning_sq, speed_sq, launch_speed_sq,
             park_factor, park_hr_factor,
