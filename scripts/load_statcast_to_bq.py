@@ -45,9 +45,17 @@ def _add_computed_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 def _convert_types(df: pd.DataFrame) -> pd.DataFrame:
     """Convert types for BQ compatibility."""
-    # Convert game_date to string
-    if "game_date" in df.columns:
-        df["game_date"] = df["game_date"].astype(str)
+    # String columns — force to str to avoid Int64/Arrow type errors
+    str_cols = [
+        "sv_id", "game_date", "des", "description",
+        "pitch_type", "pitch_name", "events", "bb_type", "type",
+        "home_team", "away_team", "player_name", "stand", "p_throws",
+        "inning_topbot", "game_type", "umpire",
+        "if_fielding_alignment", "of_fielding_alignment",
+    ]
+    for col in str_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str).replace("nan", None)
 
     # Convert numeric columns
     numeric_cols = [
@@ -66,6 +74,11 @@ def _convert_types(df: pd.DataFrame) -> pd.DataFrame:
     for col in numeric_cols:
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Downcast nullable Int64 columns to float64 (Arrow compatibility)
+    for col in df.columns:
+        if pd.api.types.is_integer_dtype(df[col]) and df[col].isna().any():
+            df[col] = df[col].astype("float64")
 
     return df
 
