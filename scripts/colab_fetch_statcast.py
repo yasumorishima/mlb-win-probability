@@ -2,8 +2,8 @@
 Colab-MCP用: Statcastデータ取得 → Drive保存 → BQロード → Drive削除
 
 Google Colabで実行することを想定。
-1. pybaseballでStatcastデータを年ごとに取得（2015-2024）
-2. Google Drive に一時保存（parquet）
+1. pybaseballでStatcastデータを年ごとに取得（2015-2025）
+2. Google Drive に一時保存（parquet）— 全カラム保持（フィルタなし）
 3. BigQueryにロード
 4. Drive上のparquetを削除
 
@@ -12,7 +12,6 @@ Usage (colab-mcp):
   %run colab_fetch_statcast.py
 """
 
-import os
 import time
 from pathlib import Path
 
@@ -23,53 +22,11 @@ from pybaseball import statcast
 # Config
 # ============================================================
 
-YEARS = list(range(2015, 2025))  # 2015-2024
+YEARS = list(range(2015, 2026))  # 2015-2025
 DRIVE_DIR = Path("/content/drive/MyDrive/kaggle/mlb_wp/statcast/")
 BQ_PROJECT = "data-platform-490901"
 BQ_DATASET = "mlb_wp"
 BQ_TABLE = "statcast_pitches"
-
-# Columns to keep (70 WP-relevant columns out of 118)
-WP_COLUMNS = [
-    "game_pk", "game_date", "game_year", "game_type",
-    "home_team", "away_team",
-    "inning", "inning_topbot", "at_bat_number", "pitch_number",
-    "outs_when_up", "balls", "strikes",
-    "on_1b", "on_2b", "on_3b",
-    "home_score", "away_score", "bat_score", "fld_score",
-    "post_home_score", "post_away_score",
-    "batter", "pitcher", "player_name",
-    "stand", "p_throws",
-    "pitch_type", "pitch_name",
-    "release_speed", "effective_speed",
-    "release_spin_rate", "spin_axis",
-    "pfx_x", "pfx_z",
-    "plate_x", "plate_z",
-    "release_pos_x", "release_pos_y", "release_pos_z",
-    "release_extension", "arm_angle",
-    "vx0", "vy0", "vz0", "ax", "ay", "az",
-    # Bat tracking (2024+ only)
-    "bat_speed", "swing_length", "attack_angle", "attack_direction",
-    # Batted ball
-    "type", "events", "description",
-    "bb_type",
-    "launch_speed", "launch_angle", "launch_speed_angle",
-    "hit_distance_sc", "hc_x", "hc_y",
-    # Expected stats
-    "estimated_ba_using_speedangle",
-    "estimated_slg_using_speedangle",
-    "estimated_woba_using_speedangle",
-    "woba_value", "woba_denom",
-    # Win expectancy (MLB home_win_exp — benchmark)
-    "home_win_exp", "bat_win_exp",
-    "delta_home_win_exp", "delta_run_exp",
-    # Zone
-    "zone", "sz_top", "sz_bot",
-    # Context
-    "if_fielding_alignment", "of_fielding_alignment",
-    "n_thruorder_pitcher", "n_priorpa_thisgame_player_at_bat",
-]
-
 
 def fetch_and_save(year: int) -> Path | None:
     """Fetch one year of Statcast data and save to Drive."""
@@ -94,9 +51,8 @@ def fetch_and_save(year: int) -> Path | None:
     if "game_type" in df.columns:
         df = df[df["game_type"].isin(["R", "F", "D", "L", "W"])].copy()
 
-    # Keep WP-relevant columns only
-    available = [c for c in WP_COLUMNS if c in df.columns]
-    df = df[available].copy()
+    # Keep ALL columns — no filtering
+    print(f"  [{year}] Columns: {len(df.columns)}")
 
     df.to_parquet(output_path, index=False, compression="snappy")
     size_mb = output_path.stat().st_size / 1024 / 1024
@@ -106,7 +62,7 @@ def fetch_and_save(year: int) -> Path | None:
 
 
 def load_to_bq():
-    """Load all parquet files from Drive into BigQuery."""
+    """Load all parquet files from Drive into BigQuery, year-by-year (OOM対策)."""
     from google.cloud import bigquery
 
     # Auth (Colab uses default credentials from google.colab.auth)
@@ -124,35 +80,64 @@ def load_to_bq():
         print("ERROR: No parquet files found")
         return False
 
-    print(f"\nLoading {len(parquet_files)} files to BigQuery...")
+    print(f"\nLoading {len(parquet_files)} files to BigQuery (year-by-year)...")
 
-    dfs = []
-    for pf in parquet_files:
+    total_rows = 0
+    max_cols = 0
+
+    for i, pf in enumerate(parquet_files):
         df = pd.read_parquet(pf)
-        print(f"  {pf.name}: {len(df):,} rows")
-        dfs.append(df)
+        n_raw = len(df)
+        n_cols = len(df.columns)
+        max_cols = max(max_cols, n_cols)
 
-    combined = pd.concat(dfs, ignore_index=True)
+        # Add computed columns
+        if "home_score" in df.columns and "away_score" in df.columns:
+            df["score_diff"] = df["home_score"] - df["away_score"]
+        if "inning_topbot" in df.columns:
+            df["is_bottom"] = (df["inning_topbot"] == "Bot").astype(int)
 
-    # Add computed columns
-    combined["score_diff"] = combined["home_score"] - combined["away_score"]
-    combined["is_bottom"] = (combined["inning_topbot"] == "Bot").astype(int)
+        # Convert game_date to string
+        if "game_date" in df.columns:
+            df["game_date"] = df["game_date"].astype(str)
 
-    # Convert game_date to string
-    if "game_date" in combined.columns:
-        combined["game_date"] = combined["game_date"].astype(str)
+        # Convert numeric columns
+        numeric_cols = [
+            "inning", "outs_when_up", "balls", "strikes",
+            "home_score", "away_score", "bat_score", "fld_score",
+            "post_home_score", "post_away_score",
+            "launch_angle", "hit_distance_sc",
+            "release_spin_rate", "spin_axis",
+            "bat_speed", "swing_length", "attack_angle",
+            "zone", "score_diff", "is_bottom",
+            "hit_location", "age_bat", "age_pit",
+        ]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
 
-    print(f"  Total: {len(combined):,} rows, {len(combined.columns)} columns")
+        # First file: TRUNCATE, rest: APPEND
+        # ALLOW_FIELD_ADDITION: 2024+ has bat_speed/swing_length etc. not in 2015
+        disposition = "WRITE_TRUNCATE" if i == 0 else "WRITE_APPEND"
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=disposition,
+            autodetect=True,
+            schema_update_options=[
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
+            ],
+        )
 
-    job_config = bigquery.LoadJobConfig(
-        write_disposition="WRITE_TRUNCATE",
-        autodetect=True,
-    )
-    job = client.load_table_from_dataframe(combined, table_ref, job_config=job_config)
-    job.result()
+        print(f"  {pf.name}: {n_raw:,} rows, {n_cols} cols ({disposition})")
+        job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)
+        job.result()
+        total_rows += len(df)
+
+        del df  # Free memory
 
     table = client.get_table(table_ref)
-    print(f"  BQ loaded: {table.num_rows:,} rows, {table.num_bytes / 1024 / 1024:.1f} MB")
+    print(f"\n  BQ loaded: {table.num_rows:,} rows, {len(table.schema)} cols, "
+          f"{table.num_bytes / 1024**3:.2f} GB")
+    print(f"  Max columns per year: {max_cols}")
     return True
 
 

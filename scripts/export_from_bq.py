@@ -131,20 +131,7 @@ def export_statcast_from_bq(output_dir: Path) -> bool:
             csv_path = output_dir / f"statcast_pitches_{year}.csv"
 
             query = f"""
-                SELECT
-                    game_pk, game_year, home_team,
-                    inning, inning_topbot, outs_when_up, balls, strikes,
-                    on_1b, on_2b, on_3b,
-                    home_score, away_score, score_diff, is_bottom,
-                    post_home_score, post_away_score,
-                    release_speed, effective_speed, pfx_x, pfx_z,
-                    plate_x, plate_z, release_spin_rate, release_extension,
-                    launch_speed, launch_angle, hit_distance_sc,
-                    estimated_woba_using_speedangle, estimated_ba_using_speedangle,
-                    woba_value, bb_type, zone,
-                    bat_speed, swing_length,
-                    n_thruorder_pitcher, n_priorpa_thisgame_player_at_bat,
-                    home_win_exp, events
+                SELECT *
                 FROM `{PROJECT}.{DATASET}.{STATCAST_TABLE}`
                 WHERE game_type = 'R' AND events IS NOT NULL
                   AND game_year = {year}

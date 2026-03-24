@@ -1,12 +1,14 @@
 """
 Load Statcast parquet files into BigQuery for WP model training.
 
-Reads parquet files from Google Drive (or local) and loads into
+Loads year-by-year to avoid OOM (each year ~800MB, runner has 7GB RAM).
+First year uses WRITE_TRUNCATE, subsequent years WRITE_APPEND.
+
+Reads parquet files from data/statcast/ and loads into
 data-platform-490901.mlb_wp.statcast_pitches table.
 
 Usage:
   python scripts/load_statcast_to_bq.py --data-dir data/statcast/
-  python scripts/load_statcast_to_bq.py --data-dir /content/drive/MyDrive/kaggle/mlb_wp/
 """
 
 from __future__ import annotations
@@ -22,8 +24,54 @@ DATASET = "mlb_wp"
 TABLE = "statcast_pitches"
 
 
+def _add_computed_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Add computed columns for WP model."""
+    if "home_score" in df.columns and "away_score" in df.columns:
+        df["score_diff"] = df["home_score"] - df["away_score"]
+    if "inning_topbot" in df.columns:
+        df["is_bottom"] = (df["inning_topbot"] == "Bot").astype(int)
+    if all(c in df.columns for c in ["on_1b", "on_2b", "on_3b"]):
+        df["total_runners"] = (
+            df["on_1b"].notna().astype(int)
+            + df["on_2b"].notna().astype(int)
+            + df["on_3b"].notna().astype(int)
+        )
+        df["scoring_position"] = (
+            df["on_2b"].notna().astype(int)
+            + df["on_3b"].notna().astype(int)
+        )
+    return df
+
+
+def _convert_types(df: pd.DataFrame) -> pd.DataFrame:
+    """Convert types for BQ compatibility."""
+    # Convert game_date to string
+    if "game_date" in df.columns:
+        df["game_date"] = df["game_date"].astype(str)
+
+    # Convert numeric columns
+    numeric_cols = [
+        "inning", "outs_when_up", "balls", "strikes",
+        "home_score", "away_score", "bat_score", "fld_score",
+        "post_home_score", "post_away_score",
+        "launch_angle", "hit_distance_sc",
+        "release_spin_rate", "spin_axis",
+        "bat_speed", "swing_length", "attack_angle",
+        "zone", "score_diff", "is_bottom",
+        "total_runners", "scoring_position",
+        "post_bat_score", "post_fld_score",
+        "bat_score_diff", "hit_location",
+        "age_bat", "age_pit",
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    return df
+
+
 def load_to_bq(data_dir: Path):
-    """Load all statcast parquet files into BigQuery."""
+    """Load all statcast parquet files into BigQuery, one year at a time."""
     from google.cloud import bigquery
 
     # Handle GCP auth
@@ -42,63 +90,98 @@ def load_to_bq(data_dir: Path):
         return
 
     print(f"Found {len(parquet_files)} parquet files")
-
-    # Load and concatenate
-    dfs = []
-    for pf in parquet_files:
-        df = pd.read_parquet(pf)
-        print(f"  {pf.name}: {len(df):,} rows")
-        dfs.append(df)
-
-    combined = pd.concat(dfs, ignore_index=True)
-    print(f"\nTotal: {len(combined):,} rows, {len(combined.columns)} columns")
-
-    # Add computed columns for WP model
-    combined["score_diff"] = combined["home_score"] - combined["away_score"]
-    combined["is_bottom"] = (combined["inning_topbot"] == "Bot").astype(int)
-    combined["total_runners"] = (
-        combined["on_1b"].notna().astype(int) +
-        combined["on_2b"].notna().astype(int) +
-        combined["on_3b"].notna().astype(int)
-    )
-    combined["scoring_position"] = (
-        combined["on_2b"].notna().astype(int) +
-        combined["on_3b"].notna().astype(int)
-    )
-
-    # Convert nullable int columns
-    int_cols = ["inning", "outs_when_up", "balls", "strikes",
-                "home_score", "away_score", "bat_score", "fld_score",
-                "post_home_score", "post_away_score",
-                "launch_angle", "hit_distance_sc",
-                "release_spin_rate", "spin_axis",
-                "bat_speed", "swing_length", "attack_angle",
-                "zone", "score_diff", "is_bottom",
-                "total_runners", "scoring_position"]
-    for col in int_cols:
-        if col in combined.columns:
-            combined[col] = pd.to_numeric(combined[col], errors="coerce")
-
-    # Convert game_date to string for BQ
-    if "game_date" in combined.columns:
-        combined["game_date"] = combined["game_date"].astype(str)
-
-    # Load to BigQuery
     table_ref = f"{PROJECT}.{DATASET}.{TABLE}"
-    print(f"\nLoading to {table_ref}...")
 
-    job_config = bigquery.LoadJobConfig(
-        write_disposition="WRITE_TRUNCATE",
-        autodetect=True,
-    )
+    # Coverage tracking
+    coverage = []
+    total_rows = 0
+    total_cols = 0
 
-    job = client.load_table_from_dataframe(
-        combined, table_ref, job_config=job_config
-    )
-    job.result()  # Wait for completion
+    # Load year-by-year to avoid OOM
+    for i, pf in enumerate(parquet_files):
+        df = pd.read_parquet(pf)
+        year_label = pf.stem.replace("statcast_", "")
+        n_raw = len(df)
+        n_cols = len(df.columns)
+        total_cols = max(total_cols, n_cols)
 
+        print(f"\n{'='*50}")
+        print(f"  {pf.name}: {n_raw:,} rows, {n_cols} columns")
+
+        # Add computed columns
+        df = _add_computed_columns(df)
+        df = _convert_types(df)
+
+        n_final = len(df)
+        total_rows += n_final
+
+        # First file: TRUNCATE, rest: APPEND
+        # ALLOW_FIELD_ADDITION: 2024+ has bat_speed/swing_length etc. not in 2015
+        disposition = "WRITE_TRUNCATE" if i == 0 else "WRITE_APPEND"
+        job_config = bigquery.LoadJobConfig(
+            write_disposition=disposition,
+            autodetect=True,
+            schema_update_options=[
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
+            ],
+        )
+
+        print(f"  Loading to BQ ({disposition})...")
+        job = client.load_table_from_dataframe(
+            df, table_ref, job_config=job_config
+        )
+        job.result()  # Wait for completion
+        print(f"  Done: {n_final:,} rows loaded")
+
+        # Check for key columns
+        key_cols = [
+            "fielder_2", "fielder_3", "fielder_4", "fielder_5",
+            "fielder_6", "fielder_7", "fielder_8", "fielder_9",
+            "hit_location", "des", "umpire",
+            "babip_value", "iso_value", "delta_pitcher_run_exp",
+            "bat_speed", "swing_length", "hyper_speed",
+            "age_bat", "age_pit",
+        ]
+        present = [c for c in key_cols if c in df.columns]
+        missing = [c for c in key_cols if c not in df.columns]
+
+        coverage.append({
+            "year": year_label,
+            "rows": n_final,
+            "columns": len(df.columns),
+            "key_present": len(present),
+            "key_missing": missing,
+        })
+
+        # Free memory
+        del df
+
+    # Final verification
+    print(f"\n{'='*60}")
+    print("COVERAGE REPORT")
+    print(f"{'='*60}")
+    print(f"{'Year':<8} {'Rows':>10} {'Cols':>6} {'Key Present':>12}")
+    print(f"{'-'*8} {'-'*10} {'-'*6} {'-'*12}")
+    for c in coverage:
+        print(f"{c['year']:<8} {c['rows']:>10,} {c['columns']:>6} {c['key_present']:>12}/19")
+    print(f"{'-'*8} {'-'*10} {'-'*6} {'-'*12}")
+    print(f"{'TOTAL':<8} {total_rows:>10,} {total_cols:>6}")
+
+    # Show which key columns are missing (across any year)
+    all_missing = set()
+    for c in coverage:
+        all_missing.update(c["key_missing"])
+    if all_missing:
+        print(f"\nKey columns missing in some years: {sorted(all_missing)}")
+    else:
+        print("\nAll 19 key columns present in all years!")
+
+    # Verify BQ table
     table = client.get_table(table_ref)
-    print(f"Loaded: {table.num_rows:,} rows, {table.num_bytes / 1024 / 1024:.1f} MB")
+    print(f"\nBQ Table: {table.num_rows:,} rows, {len(table.schema)} columns, "
+          f"{table.num_bytes / 1024**3:.2f} GB")
+
+    return coverage
 
 
 def main():
