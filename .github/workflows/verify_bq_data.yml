@@ -151,11 +151,14 @@ jobs:
             COUNT(*) AS total,
             COUNTIF(o.season IS NOT NULL) AS matched,
             ROUND(COUNTIF(o.season IS NOT NULL) / COUNT(*) * 100, 1) AS pct
-          FROM \`data-platform-490901.mlb_wp.statcast_pitches\` s
+          FROM (
+            SELECT *, CASE WHEN inning_topbot = \"Bot\" THEN away_team ELSE home_team END AS fielding_team
+            FROM \`data-platform-490901.mlb_wp.statcast_pitches\`
+            WHERE game_type = \"R\" AND events IS NOT NULL
+          ) s
           LEFT JOIN \`data-platform-490901.mlb_wp.statcast_team_oaa\` o
             ON s.fielding_team = o.team_abbrev
             AND CAST(s.game_year AS INT64) = CAST(o.season AS INT64)
-          WHERE s.game_type = \"R\" AND s.events IS NOT NULL
           GROUP BY s.game_year ORDER BY s.game_year
           '''
           total_all, matched_all = 0, 0
