@@ -14,7 +14,12 @@ on:
       end_year:
         description: 'End year (inclusive)'
         required: false
-        default: '2025'
+        default: '2024'
+      append:
+        description: 'Append to existing table (do not truncate)'
+        required: false
+        type: boolean
+        default: false
 
 jobs:
   reload:
@@ -50,7 +55,13 @@ jobs:
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
         run: |
-          python scripts/load_statcast_to_bq.py --data-dir data/statcast/
+          APPEND_FLAG=""
+          if [ "${{ inputs.append }}" = "true" ]; then
+            APPEND_FLAG="--append"
+          fi
+          python scripts/load_statcast_to_bq.py \
+            --data-dir data/statcast/ \
+            $APPEND_FLAG
 
       - name: Verify BQ table
         env:
@@ -77,6 +88,7 @@ jobs:
           echo "## Reload Statcast BQ" >> $GITHUB_STEP_SUMMARY
           echo "**Memo**: ${{ inputs.memo }}" >> $GITHUB_STEP_SUMMARY
           echo "**Years**: ${{ inputs.start_year }}-${{ inputs.end_year }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Append**: ${{ inputs.append }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           python -c "
           try:
@@ -108,7 +120,7 @@ jobs:
           table = client.get_table('data-platform-490901.mlb_wp.statcast_pitches')
           print(f'{table.num_rows:,} rows / {len(table.schema)} cols / {table.num_bytes / 1024**3:.2f} GB')
           " 2>/dev/null || echo "BQ query failed")
-            BODY="**Reload Statcast BQ** ✅ ${{ inputs.start_year }}-${{ inputs.end_year }} | ${METRICS} | ${RUN_URL}"
+            BODY="**Reload Statcast BQ** ✅ ${{ inputs.start_year }}-${{ inputs.end_year }} (append=${{ inputs.append }}) | ${METRICS} | ${RUN_URL}"
           else
             BODY="**Reload Statcast BQ** ❌ ${STATUS} | ${{ inputs.memo }} | ${RUN_URL}"
           fi

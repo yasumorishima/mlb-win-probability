@@ -48,7 +48,24 @@ def fetch_year(year: int, output_dir: Path, month: int | None = None) -> Path:
     t0 = time.time()
 
     # pybaseball fetches in weekly chunks internally
-    df = statcast(start, end)
+    # Retry up to 3 times for transient API/parse errors
+    max_retries = 3
+    df = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            df = statcast(start, end)
+            break
+        except Exception as e:
+            print(f"  Attempt {attempt}/{max_retries} failed: {e}")
+            if attempt < max_retries:
+                wait = 30 * attempt
+                print(f"  Retrying in {wait}s...")
+                time.sleep(wait)
+            else:
+                raise RuntimeError(
+                    f"Failed to fetch {year} after {max_retries} attempts: {e}"
+                ) from e
+
     elapsed = time.time() - t0
     print(f"  Raw: {len(df):,} pitches in {elapsed:.0f}s")
 
