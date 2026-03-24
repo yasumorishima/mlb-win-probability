@@ -30,7 +30,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install lightgbm optuna google-cloud-bigquery pandas numpy pyarrow db-dtypes ngboost scikit-learn joblib
+          pip install lightgbm optuna google-cloud-bigquery pandas numpy pyarrow db-dtypes scikit-learn
 
       - name: Authenticate GCP
         env:
@@ -110,17 +110,18 @@ jobs:
           fi = r['lgbm'].get('feature_importance', {})
           for n, v in sorted(fi.items(), key=lambda x: -x[1])[:15]:
               print(f'| {n} | {v:.1f} |')
-          ngb = r.get('ngboost')
-          if ngb:
+          qr = r.get('quantile')
+          if qr:
               print()
-              print('### NGBoost (Bayesian)')
+              print('### Quantile Regression (Prediction Intervals)')
               print(f'| Metric | Value |')
               print(f'|--------|-------|')
-              print(f'| Brier | {ngb[\"brier\"]} |')
-              print(f'| BSS | {ngb[\"brier_skill\"]} |')
-              print(f'| ECE | {ngb[\"ece\"]} |')
-              vs_lgbm = (lgbm - ngb['brier']) / lgbm * 100
-              print(f'| **vs LightGBM** | **{vs_lgbm:+.2f}%** |')
+              if 'median_brier' in qr:
+                  print(f'| Median Brier | {qr[\"median_brier\"]} |')
+              if 'coverage_90' in qr:
+                  print(f'| 90% Coverage | {qr[\"coverage_90\"]} |')
+              if 'mean_width_90' in qr:
+                  print(f'| Mean Width | {qr[\"mean_width_90\"]} |')
           " >> $GITHUB_STEP_SUMMARY
           fi
 

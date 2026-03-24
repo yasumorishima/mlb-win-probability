@@ -64,6 +64,8 @@ class WPEngineStatcast:
         self._model = None
         self._loaded = False
         self._conformal: dict = {}  # quantile label → q value
+        self._q05_model = None      # quantile regression lower
+        self._q95_model = None      # quantile regression upper
         self._load()
 
     def _load(self):
@@ -85,15 +87,27 @@ class WPEngineStatcast:
         except Exception as e:
             print(f"WARNING: Failed to load Statcast model: {e}")
 
-        # Load conformal quantiles if available
-        conformal_path = DATA_DIR / "conformal_quantiles.json"
-        if conformal_path.exists():
+        # Load quantile regression models if available
+        q05_path = DATA_DIR / "wp_statcast_q0.05.txt"
+        q95_path = DATA_DIR / "wp_statcast_q0.95.txt"
+        if q05_path.exists() and q95_path.exists():
             try:
-                cq = json.loads(conformal_path.read_text())
-                for label, info in cq.get("quantiles", {}).items():
-                    self._conformal[label] = info["q"]
+                import lightgbm as lgb
+                self._q05_model = lgb.Booster(model_file=str(q05_path))
+                self._q95_model = lgb.Booster(model_file=str(q95_path))
             except Exception:
                 pass
+
+        # Load conformal quantiles as fallback
+        if self._q05_model is None:
+            conformal_path = DATA_DIR / "conformal_quantiles.json"
+            if conformal_path.exists():
+                try:
+                    cq = json.loads(conformal_path.read_text())
+                    for label, info in cq.get("quantiles", {}).items():
+                        self._conformal[label] = info["q"]
+                except Exception:
+                    pass
 
     @property
     def is_loaded(self) -> bool:
@@ -123,19 +137,35 @@ class WPEngineStatcast:
         wp = float(self._model.predict(X)[0])
         wp = max(0.001, min(0.999, wp))
 
-        # Conformal prediction intervals
-        q90 = self._conformal.get("90%")
-        q95 = self._conformal.get("95%")
+        # Prediction intervals (quantile regression > conformal fallback)
+        lo90, hi90, lo95, hi95 = None, None, None, None
+
+        if self._q05_model is not None and self._q95_model is not None:
+            # Quantile regression: situation-dependent intervals
+            X = np.array([features], dtype=np.float32)
+            lo90 = max(0.0, float(np.clip(self._q05_model.predict(X)[0], 0.001, 0.999)))
+            hi90 = min(1.0, float(np.clip(self._q95_model.predict(X)[0], 0.001, 0.999)))
+            # Ensure lo <= hi
+            if lo90 > hi90:
+                lo90, hi90 = hi90, lo90
+        elif self._conformal:
+            # Conformal: uniform-width intervals (fallback)
+            q90 = self._conformal.get("90%")
+            q95 = self._conformal.get("95%")
+            if q90:
+                lo90, hi90 = max(0.0, wp - q90), min(1.0, wp + q90)
+            if q95:
+                lo95, hi95 = max(0.0, wp - q95), min(1.0, wp + q95)
 
         return StatcastWPResult(
             wp=wp,
             features_used=sum(1 for f in features[26:46] if f != 0),
             has_pitch_data=pitch_data is not None,
             has_hit_data=hit_data is not None,
-            wp_lower_90=max(0.0, wp - q90) if q90 else None,
-            wp_upper_90=min(1.0, wp + q90) if q90 else None,
-            wp_lower_95=max(0.0, wp - q95) if q95 else None,
-            wp_upper_95=min(1.0, wp + q95) if q95 else None,
+            wp_lower_90=lo90,
+            wp_upper_90=hi90,
+            wp_lower_95=lo95,
+            wp_upper_95=hi95,
         )
 
     def _build_features(self, gs: dict,

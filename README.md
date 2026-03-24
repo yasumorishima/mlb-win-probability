@@ -412,11 +412,11 @@ gh workflow run "Validate WP Model" \
 
 ### Phase 2c: Statcast ベイズ + アンサンブル 🔄（現在）
 - [x] ~~旧: NumPyro 階層モデル（game-state のみ）→ Brier 0.1648、Statcast 未使用のため不採用~~
-- [x] NGBoost（Statcast 58 特徴量でベイズ学習）追加 — LightGBM と同一パイプライン
+- [x] ~~旧: NGBoost Bernoulli → 二値分類では p(1-p) しか出ず不確実性の追加価値なし~~
+- [x] Quantile Regression LightGBM（q=0.05/0.50/0.95、Statcast 58 特徴量で状況依存の予測区間）
 - [x] アンサンブル学習ワークフロー（`Train Ensemble WP`、inverse-Brier 加重平均 + Isotonic 補正）
 - [x] Streamlit エンジン比較セクション（v1 / Statcast / Ensemble 並列表示）
-- [ ] **NGBoost 初回学習結果待ち**（Run 23471927901）
-- [ ] NGBoost ランタイムエンジン実装 + アンサンブル組み込み
+- [ ] **Quantile Regression 初回学習結果待ち**
 - [ ] 本番アンサンブル確定（最良エンジン構成を決定）
 
 ### Phase 3: AI Commentary 🔄（現在）

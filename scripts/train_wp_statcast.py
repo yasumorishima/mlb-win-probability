@@ -473,46 +473,81 @@ def main():
             print("  CatBoost not installed, skipping")
 
     # -------------------------------------------------------
-    # NGBoost (Natural Gradient Boosting — Bayesian)
+    # Quantile Regression LightGBM (prediction intervals)
     # -------------------------------------------------------
-    ngb_metrics = None
-    try:
-        from ngboost import NGBClassifier
-        from ngboost.distns import Bernoulli
+    quantile_results = {}
+    quantile_alphas = [0.05, 0.50, 0.95]
 
-        print(f"\n{'=' * 60}")
-        print(f"NGBoost Bayesian ({len(feature_names)} features)")
-        print(f"{'=' * 60}")
+    print(f"\n{'=' * 60}")
+    print(f"Quantile Regression LightGBM ({len(feature_names)} features)")
+    print(f"{'=' * 60}")
 
-        ngb = NGBClassifier(
-            Dist=Bernoulli,
-            n_estimators=500,
-            learning_rate=0.04,
-            minibatch_frac=0.8,
-            natural_gradient=True,
-            verbose=True,
-            verbose_eval=100,
-            random_state=42,
-        )
-        ngb.fit(
-            X_train, y_train,
-            X_val=X_test, Y_val=y_test,
-            early_stopping_rounds=50,
-        )
+    for alpha in quantile_alphas:
+        q_params = {
+            "objective": "quantile",
+            "alpha": alpha,
+            "metric": "quantile",
+            "learning_rate": 0.03,
+            "num_leaves": 127,
+            "max_depth": 10,
+            "min_child_samples": 200,
+            "feature_fraction": 0.7,
+            "bagging_fraction": 0.7,
+            "bagging_freq": 5,
+            "reg_alpha": 0.1,
+            "reg_lambda": 1.0,
+            "verbose": -1,
+            "seed": 42,
+        }
+        q_td = lgb.Dataset(X_train, y_train, feature_name=feature_names)
+        q_vd = lgb.Dataset(X_test, y_test, feature_name=feature_names, reference=q_td)
+        q_model = lgb.train(
+            q_params, q_td, 3000, valid_sets=[q_vd],
+            callbacks=[lgb.log_evaluation(0), lgb.early_stopping(100)])
 
-        ngb_preds = ngb.predict_proba(X_test)[:, 1]
-        ngb_metrics = evaluate(ngb_preds, y_test, "NGBoost_statcast")
+        q_preds = np.clip(q_model.predict(X_test), 0.001, 0.999)
+
+        # Coverage check
+        if alpha < 0.5:
+            below = (y_test <= q_preds).mean()
+            print(f"  q={alpha:.2f}: mean={q_preds.mean():.4f}, "
+                  f"P(y <= q)={below:.4f} (target {alpha:.2f}), "
+                  f"iters={q_model.best_iteration}")
+        elif alpha > 0.5:
+            above = (y_test >= q_preds).mean()
+            coverage = 1 - above + (y_test <= np.clip(
+                lgb.Booster(model_file=str(output_dir / f"wp_statcast_q{quantile_alphas[0]:.2f}.txt")).predict(X_test)
+                if (output_dir / f"wp_statcast_q{quantile_alphas[0]:.2f}.txt").exists()
+                else q_preds, 0.001, 0.999)).mean()
+            print(f"  q={alpha:.2f}: mean={q_preds.mean():.4f}, "
+                  f"iters={q_model.best_iteration}")
+        else:
+            q_brier = float(np.mean((q_preds - y_test) ** 2))
+            print(f"  q={alpha:.2f} (median): mean={q_preds.mean():.4f}, "
+                  f"Brier={q_brier:.6f}, iters={q_model.best_iteration}")
+            quantile_results["median_brier"] = round(q_brier, 6)
 
         # Save model
-        import joblib
-        ngb_path = output_dir / "wp_statcast_ngboost.pkl"
-        joblib.dump(ngb, ngb_path)
-        print(f"  Saved: {ngb_path}")
+        q_path = output_dir / f"wp_statcast_q{alpha:.2f}.txt"
+        q_model.save_model(str(q_path))
+        quantile_results[f"q{alpha:.2f}_mean"] = round(float(q_preds.mean()), 4)
 
-    except ImportError:
-        print("\n  NGBoost not installed, skipping (pip install ngboost)")
-    except Exception as e:
-        print(f"\n  NGBoost failed: {e}")
+    # Coverage of 90% interval (q0.05 to q0.95)
+    q05_path = output_dir / "wp_statcast_q0.05.txt"
+    q95_path = output_dir / "wp_statcast_q0.95.txt"
+    if q05_path.exists() and q95_path.exists():
+        q05_model = lgb.Booster(model_file=str(q05_path))
+        q95_model = lgb.Booster(model_file=str(q95_path))
+        lo = np.clip(q05_model.predict(X_test), 0.001, 0.999)
+        hi = np.clip(q95_model.predict(X_test), 0.001, 0.999)
+        coverage_90 = float(((y_test >= lo) & (y_test <= hi)).mean())
+        mean_width = float((hi - lo).mean())
+        print(f"\n  90% interval coverage: {coverage_90:.4f} (target 0.90)")
+        print(f"  Mean interval width: {mean_width:.4f}")
+        quantile_results["coverage_90"] = round(coverage_90, 4)
+        quantile_results["mean_width_90"] = round(mean_width, 4)
+
+    print(f"  Saved: {[f'wp_statcast_q{a:.2f}.txt' for a in quantile_alphas]}")
 
     # -------------------------------------------------------
     # Comparison
@@ -540,13 +575,8 @@ def main():
             cb_vs_mlb = (mlb_brier - cb_metrics["brier"]) / mlb_brier * 100
             print(f"  CatBoost vs MLB benchmark: {cb_vs_mlb:+.2f}% Brier")
 
-    if ngb_metrics:
-        results["ngboost"] = ngb_metrics
-        if mlb_metrics:
-            ngb_vs_mlb = (mlb_brier - ngb_metrics["brier"]) / mlb_brier * 100
-            print(f"  NGBoost vs MLB benchmark: {ngb_vs_mlb:+.2f}% Brier")
-        lgbm_vs_ngb = (lgbm_metrics["brier"] - ngb_metrics["brier"]) / lgbm_metrics["brier"] * 100
-        print(f"  NGBoost vs LightGBM: {lgbm_vs_ngb:+.2f}% Brier")
+    if quantile_results:
+        results["quantile"] = quantile_results
 
     # Save
     results_path = output_dir / "wp_statcast_results.json"
