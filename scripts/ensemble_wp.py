@@ -187,7 +187,7 @@ def _load_statcast_csvs(data_dir: Path, years: list[int] | None = None,
 
     dfs = []
     for c in csvs:
-        year = int(c.stem.split("_")[-1])
+        year = int(float(c.stem.split("_")[-1]))
         if years and year not in years:
             continue
         dfs.append(pd.read_csv(c))

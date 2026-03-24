@@ -123,7 +123,7 @@ def export_statcast_from_bq(output_dir: Path) -> bool:
             WHERE game_type = 'R' AND events IS NOT NULL
             ORDER BY game_year
         """
-        years = [row.game_year for row in client.query(query).result()]
+        years = [int(row.game_year) for row in client.query(query).result()]
         print(f"BQ statcast_pitches years: {years}")
 
         total_rows = 0
