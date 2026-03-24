@@ -39,6 +39,8 @@ from pathlib import Path
 import numpy as np
 from scipy.special import ndtr as _ndtr
 
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
 # Lazy imports for JAX/NumPyro (fail fast with clear message)
 try:
     import jax
@@ -268,7 +270,6 @@ def _compute_statcast_base_wp(states: list[dict],
                       f"({n_collisions:,} collisions)")
 
         # Game-state-only fallback engine
-        sys.path.insert(0, str(Path(__file__).parent.parent))
         from win_probability_statcast import WPEngineStatcast
         engine = WPEngineStatcast.__new__(WPEngineStatcast)
         engine._model = model
@@ -311,7 +312,7 @@ def _compute_statcast_base_wp(states: list[dict],
         return preds
 
     except ImportError as e:
-        print(f"  LightGBM/pandas not installed, falling back to Markov WP: {e}")
+        print(f"  Import error, falling back to Markov WP: {e}")
         return None
     except Exception as e:
         print(f"  Statcast model load failed: {e}, falling back to Markov WP")
