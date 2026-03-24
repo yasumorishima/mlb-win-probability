@@ -272,7 +272,7 @@ export WANDB_API_KEY="your-wandb-key"
 | **LightGBM (Statcast)** | **0.1544** | **0.3825** | **0.4610** | **0.0067** |
 | vs MLB ベンチマーク | **+1.90%** | | | |
 
-**165 特徴量**（Statcast 76: 投球速度・変化量・打球・バットトラッキング・ゾーン・軌道等 + FanGraphs 投手 46: Stuff+/SIERA/ERA-/ゾーン別制球等 + FanGraphs 打者 35: wRC+/選球眼/打球傾向/走塁等）、Optuna 50 trial。MLB Stats API live feed からリアルタイム取得可能。
+**165 特徴量**（Statcast 76: 投球速度・変化量・打球・バットトラッキング・ゾーン・軌道等 + FanGraphs 投手 46: Stuff+/SIERA/ERA-/ゾーン別制球等 + FanGraphs 打者 35: wRC+/選球眼/打球傾向/走塁等 + 走塁守備 8: sprint speed/OAA/catcher pop time・arm strength）、Optuna 50 trial。MLB Stats API live feed からリアルタイム取得可能。
 
 ### データ基盤（BigQuery）
 
@@ -285,6 +285,10 @@ export WANDB_API_KEY="your-wandb-key"
 | `mlb_statcast.raw_park_factors` | 329 | 球場パークファクター（savant-extras） |
 | `mlb_wp.fg_batting_stats` | ~5,300 | **FanGraphs 打者シーズン成績**（wRC+/選球眼/打球傾向/走塁/WAR 等 40+ 指標、2015-2024） |
 | `mlb_wp.fg_pitching_stats` | ~4,300 | **FanGraphs 投手シーズン成績**（Stuff+/SIERA/ERA-/ゾーン制球/WAR 等 45+ 指標、2015-2024） |
+| `mlb_wp.statcast_sprint_speed` | — | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2015-2024） |
+| `mlb_wp.statcast_oaa` | — | **Statcast OAA**（7 ポジション別 Outs Above Average、2016-2024） |
+| `mlb_wp.statcast_team_oaa` | — | **チーム OAA 集計**（チーム×シーズン別の合計/平均 OAA） |
+| `mlb_wp.statcast_catcher` | — | **Statcast 捕手能力**（pop time、arm strength、exchange time、2015-2024） |
 
 Statcast データは pybaseball 全 118 カラム + computed 4 = **122 カラム**を保持（投球速度・変化量・打球速度・発射角度・xwOBA・バットトラッキング・選手年齢・ストライクゾーン・リリースポイント・投球軌道・MLB ベンチマーク WP 等）。WP モデル学習時は**打席結果のみ（`events IS NOT NULL`）**に絞り、約 172 万行で学習。
 
