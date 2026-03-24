@@ -121,6 +121,82 @@ jobs:
                       break
 
           print()
+          print('=' * 60)
+          print('SPRINT SPEED JOIN TEST (Statcast × Sprint)')
+          print('=' * 60)
+          q_sprint = '''
+          SELECT s.game_year,
+            COUNT(*) AS total,
+            COUNTIF(sp.player_id IS NOT NULL) AS matched,
+            ROUND(COUNTIF(sp.player_id IS NOT NULL) / COUNT(*) * 100, 1) AS pct
+          FROM \`data-platform-490901.mlb_wp.statcast_pitches\` s
+          LEFT JOIN \`data-platform-490901.mlb_wp.statcast_sprint_speed\` sp
+            ON CAST(s.batter AS INT64) = CAST(sp.player_id AS INT64)
+            AND CAST(s.game_year AS INT64) = CAST(sp.season AS INT64)
+          WHERE s.game_type = \"R\" AND s.events IS NOT NULL
+          GROUP BY s.game_year ORDER BY s.game_year
+          '''
+          total_all, matched_all = 0, 0
+          for row in client.query(q_sprint).result():
+              print(f'  {int(row.game_year)}: {row.total:>8,} ABs, {row.pct}% sprint matched')
+              total_all += row.total; matched_all += row.matched
+          print(f'  TOTAL: {total_all:,} ABs, {matched_all/total_all*100:.1f}% matched')
+
+          print()
+          print('=' * 60)
+          print('TEAM OAA JOIN TEST (Statcast × Team OAA)')
+          print('=' * 60)
+          q_oaa = '''
+          SELECT s.game_year,
+            COUNT(*) AS total,
+            COUNTIF(o.season IS NOT NULL) AS matched,
+            ROUND(COUNTIF(o.season IS NOT NULL) / COUNT(*) * 100, 1) AS pct
+          FROM \`data-platform-490901.mlb_wp.statcast_pitches\` s
+          LEFT JOIN \`data-platform-490901.mlb_wp.statcast_team_oaa\` o
+            ON s.fielding_team = o.team_abbrev
+            AND CAST(s.game_year AS INT64) = CAST(o.season AS INT64)
+          WHERE s.game_type = \"R\" AND s.events IS NOT NULL
+          GROUP BY s.game_year ORDER BY s.game_year
+          '''
+          total_all, matched_all = 0, 0
+          for row in client.query(q_oaa).result():
+              print(f'  {int(row.game_year)}: {row.total:>8,} ABs, {row.pct}% team OAA matched')
+              total_all += row.total; matched_all += row.matched
+          print(f'  TOTAL: {total_all:,} ABs, {matched_all/total_all*100:.1f}% matched')
+
+          print()
+          print('=' * 60)
+          print('CATCHER JOIN TEST (Statcast × Catcher)')
+          print('=' * 60)
+          q_catch = '''
+          SELECT s.game_year,
+            COUNT(*) AS total,
+            COUNTIF(c.player_id IS NOT NULL) AS matched,
+            ROUND(COUNTIF(c.player_id IS NOT NULL) / COUNT(*) * 100, 1) AS pct
+          FROM \`data-platform-490901.mlb_wp.statcast_pitches\` s
+          LEFT JOIN \`data-platform-490901.mlb_wp.statcast_catcher\` c
+            ON CAST(s.fielder_2 AS INT64) = CAST(c.player_id AS INT64)
+            AND CAST(s.game_year AS INT64) = CAST(c.season AS INT64)
+          WHERE s.game_type = \"R\" AND s.events IS NOT NULL
+          GROUP BY s.game_year ORDER BY s.game_year
+          '''
+          total_all, matched_all = 0, 0
+          for row in client.query(q_catch).result():
+              print(f'  {int(row.game_year)}: {row.total:>8,} ABs, {row.pct}% catcher matched')
+              total_all += row.total; matched_all += row.matched
+          print(f'  TOTAL: {total_all:,} ABs, {matched_all/total_all*100:.1f}% matched')
+
+          print()
+          print('=' * 60)
+          print('FIELDING/RUNNING NULL RATE SUMMARY')
+          print('=' * 60)
+          for tn in ['statcast_sprint_speed', 'statcast_oaa', 'statcast_team_oaa', 'statcast_catcher']:
+              t = client.get_table(f'{PROJECT}.mlb_wp.{tn}')
+              q_null = f'SELECT * FROM \`{PROJECT}.mlb_wp.{tn}\` LIMIT 0'
+              cols = [f.name for f in t.schema]
+              print(f'  {tn}: {t.num_rows:,} rows, cols={cols[:5]}...')
+
+          print()
           print('=== VERIFICATION COMPLETE ===')
           "
 
