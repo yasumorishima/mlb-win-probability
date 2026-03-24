@@ -117,15 +117,16 @@ def load_to_bq():
                 df[col] = pd.to_numeric(df[col], errors="coerce")
 
         # First file: TRUNCATE, rest: APPEND
-        # ALLOW_FIELD_ADDITION: 2024+ has bat_speed/swing_length etc. not in 2015
         disposition = "WRITE_TRUNCATE" if i == 0 else "WRITE_APPEND"
         job_config = bigquery.LoadJobConfig(
             write_disposition=disposition,
             autodetect=True,
-            schema_update_options=[
-                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
-            ],
         )
+        # ALLOW_FIELD_ADDITION only valid with WRITE_APPEND
+        if disposition == "WRITE_APPEND":
+            job_config.schema_update_options = [
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
+            ]
 
         print(f"  {pf.name}: {n_raw:,} rows, {n_cols} cols ({disposition})")
         job = client.load_table_from_dataframe(df, table_ref, job_config=job_config)

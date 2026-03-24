@@ -165,13 +165,16 @@ def load_to_bq(data_dir: Path, append: bool = False):
             disposition = "WRITE_APPEND"
         else:
             disposition = "WRITE_TRUNCATE" if i == 0 else "WRITE_APPEND"
+
         job_config = bigquery.LoadJobConfig(
             write_disposition=disposition,
             autodetect=True,
-            schema_update_options=[
-                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
-            ],
         )
+        # ALLOW_FIELD_ADDITION only valid with WRITE_APPEND
+        if disposition == "WRITE_APPEND":
+            job_config.schema_update_options = [
+                bigquery.SchemaUpdateOption.ALLOW_FIELD_ADDITION,
+            ]
 
         print(f"  Loading to BQ ({disposition})...")
         job = client.load_table_from_dataframe(
