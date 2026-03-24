@@ -473,6 +473,48 @@ def main():
             print("  CatBoost not installed, skipping")
 
     # -------------------------------------------------------
+    # NGBoost (Natural Gradient Boosting — Bayesian)
+    # -------------------------------------------------------
+    ngb_metrics = None
+    try:
+        from ngboost import NGBClassifier
+        from ngboost.distns import Bernoulli
+
+        print(f"\n{'=' * 60}")
+        print(f"NGBoost Bayesian ({len(feature_names)} features)")
+        print(f"{'=' * 60}")
+
+        ngb = NGBClassifier(
+            Dist=Bernoulli,
+            n_estimators=500,
+            learning_rate=0.04,
+            minibatch_frac=0.8,
+            natural_gradient=True,
+            verbose=True,
+            verbose_eval=100,
+            random_state=42,
+        )
+        ngb.fit(
+            X_train, y_train,
+            X_val=X_test, Y_val=y_test,
+            early_stopping_rounds=50,
+        )
+
+        ngb_preds = ngb.predict_proba(X_test)[:, 1]
+        ngb_metrics = evaluate(ngb_preds, y_test, "NGBoost_statcast")
+
+        # Save model
+        import joblib
+        ngb_path = output_dir / "wp_statcast_ngboost.pkl"
+        joblib.dump(ngb, ngb_path)
+        print(f"  Saved: {ngb_path}")
+
+    except ImportError:
+        print("\n  NGBoost not installed, skipping (pip install ngboost)")
+    except Exception as e:
+        print(f"\n  NGBoost failed: {e}")
+
+    # -------------------------------------------------------
     # Comparison
     # -------------------------------------------------------
     print(f"\n{'=' * 60}")
@@ -497,6 +539,14 @@ def main():
         if mlb_metrics:
             cb_vs_mlb = (mlb_brier - cb_metrics["brier"]) / mlb_brier * 100
             print(f"  CatBoost vs MLB benchmark: {cb_vs_mlb:+.2f}% Brier")
+
+    if ngb_metrics:
+        results["ngboost"] = ngb_metrics
+        if mlb_metrics:
+            ngb_vs_mlb = (mlb_brier - ngb_metrics["brier"]) / mlb_brier * 100
+            print(f"  NGBoost vs MLB benchmark: {ngb_vs_mlb:+.2f}% Brier")
+        lgbm_vs_ngb = (lgbm_metrics["brier"] - ngb_metrics["brier"]) / lgbm_metrics["brier"] * 100
+        print(f"  NGBoost vs LightGBM: {lgbm_vs_ngb:+.2f}% Brier")
 
     # Save
     results_path = output_dir / "wp_statcast_results.json"

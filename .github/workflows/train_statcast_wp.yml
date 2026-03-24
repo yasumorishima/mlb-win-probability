@@ -30,7 +30,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install lightgbm optuna google-cloud-bigquery pandas numpy pyarrow db-dtypes
+          pip install lightgbm optuna google-cloud-bigquery pandas numpy pyarrow db-dtypes ngboost scikit-learn joblib
 
       - name: Authenticate GCP
         env:
@@ -110,6 +110,17 @@ jobs:
           fi = r['lgbm'].get('feature_importance', {})
           for n, v in sorted(fi.items(), key=lambda x: -x[1])[:15]:
               print(f'| {n} | {v:.1f} |')
+          ngb = r.get('ngboost')
+          if ngb:
+              print()
+              print('### NGBoost (Bayesian)')
+              print(f'| Metric | Value |')
+              print(f'|--------|-------|')
+              print(f'| Brier | {ngb[\"brier\"]} |')
+              print(f'| BSS | {ngb[\"brier_skill\"]} |')
+              print(f'| ECE | {ngb[\"ece\"]} |')
+              vs_lgbm = (lgbm - ngb['brier']) / lgbm * 100
+              print(f'| **vs LightGBM** | **{vs_lgbm:+.2f}%** |')
           " >> $GITHUB_STEP_SUMMARY
           fi
 
