@@ -58,21 +58,7 @@ def load_from_bq(test_year: int = 2024) -> tuple[pd.DataFrame, pd.DataFrame]:
 
     # At-bat outcomes only (events IS NOT NULL) to reduce memory
     query = f"""
-        SELECT
-            game_pk, game_year, home_team,
-            inning, inning_topbot, outs_when_up, balls, strikes,
-            on_1b, on_2b, on_3b,
-            home_score, away_score, score_diff, is_bottom,
-            post_home_score, post_away_score,
-            release_speed, effective_speed, pfx_x, pfx_z,
-            plate_x, plate_z, release_spin_rate, release_extension,
-            launch_speed, launch_angle, hit_distance_sc,
-            estimated_woba_using_speedangle, estimated_ba_using_speedangle,
-            woba_value, bb_type, zone,
-            bat_speed, swing_length,
-            n_thruorder_pitcher, n_priorpa_thisgame_player_at_bat,
-            home_win_exp, delta_home_win_exp,
-            events, type
+        SELECT *
         FROM `{PROJECT}.{DATASET}.{TABLE}`
         WHERE game_type = 'R' AND events IS NOT NULL
         ORDER BY game_pk, inning, is_bottom, outs_when_up
@@ -232,6 +218,105 @@ def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     features["ax"] = _safe_col(df, "ax")
     features["az"] = _safe_col(df, "az")
 
+    # --- FanGraphs pitcher season stats (joined by pitcher + game_year) ---
+    # Core ERA models
+    features["fg_pit_era"] = _safe_col(df, "fg_pit_ERA", fill=4.0)
+    features["fg_pit_fip"] = _safe_col(df, "fg_pit_FIP", fill=4.0)
+    features["fg_pit_xfip"] = _safe_col(df, "fg_pit_xFIP", fill=4.0)
+    features["fg_pit_siera"] = _safe_col(df, "fg_pit_SIERA", fill=4.0)
+    features["fg_pit_era_minus"] = _safe_col(df, "fg_pit_ERA-", fill=100)
+    features["fg_pit_fip_minus"] = _safe_col(df, "fg_pit_FIP-", fill=100)
+    features["fg_pit_xfip_minus"] = _safe_col(df, "fg_pit_xFIP-", fill=100)
+    # Rate
+    features["fg_pit_k_pct"] = _safe_col(df, "fg_pit_K%", fill=0.22)
+    features["fg_pit_bb_pct"] = _safe_col(df, "fg_pit_BB%", fill=0.08)
+    features["fg_pit_k_bb_pct"] = _safe_col(df, "fg_pit_K-BB%", fill=0.14)
+    features["fg_pit_k9"] = _safe_col(df, "fg_pit_K/9", fill=8.5)
+    features["fg_pit_bb9"] = _safe_col(df, "fg_pit_BB/9", fill=3.2)
+    features["fg_pit_k_bb"] = _safe_col(df, "fg_pit_K/BB", fill=3.0)
+    features["fg_pit_hr9"] = _safe_col(df, "fg_pit_HR/9", fill=1.1)
+    features["fg_pit_hr_fb"] = _safe_col(df, "fg_pit_HR/FB", fill=0.11)
+    features["fg_pit_whip"] = _safe_col(df, "fg_pit_WHIP", fill=1.3)
+    features["fg_pit_babip"] = _safe_col(df, "fg_pit_BABIP", fill=0.29)
+    features["fg_pit_lob_pct"] = _safe_col(df, "fg_pit_LOB%", fill=0.72)
+    # Pitch quality
+    features["fg_pit_swstr"] = _safe_col(df, "fg_pit_SwStr%", fill=0.11)
+    features["fg_pit_csw"] = _safe_col(df, "fg_pit_CSW%", fill=0.28)
+    features["fg_pit_o_swing"] = _safe_col(df, "fg_pit_O-Swing%", fill=0.32)
+    features["fg_pit_z_swing"] = _safe_col(df, "fg_pit_Z-Swing%", fill=0.69)
+    features["fg_pit_o_contact"] = _safe_col(df, "fg_pit_O-Contact%", fill=0.62)
+    features["fg_pit_z_contact"] = _safe_col(df, "fg_pit_Z-Contact%", fill=0.86)
+    features["fg_pit_zone"] = _safe_col(df, "fg_pit_Zone%", fill=0.43)
+    features["fg_pit_fstrike"] = _safe_col(df, "fg_pit_F-Strike%", fill=0.60)
+    # Stuff+ (2020+, fill=100 for league average)
+    features["fg_pit_stuff_plus"] = _safe_col(df, "fg_pit_Stuff+", fill=100)
+    features["fg_pit_location_plus"] = _safe_col(df, "fg_pit_Location+", fill=100)
+    features["fg_pit_pitching_plus"] = _safe_col(df, "fg_pit_Pitching+", fill=100)
+    # Batted ball
+    features["fg_pit_gb_pct"] = _safe_col(df, "fg_pit_GB%", fill=0.42)
+    features["fg_pit_fb_pct"] = _safe_col(df, "fg_pit_FB%", fill=0.38)
+    features["fg_pit_ld_pct"] = _safe_col(df, "fg_pit_LD%", fill=0.19)
+    features["fg_pit_iffb_pct"] = _safe_col(df, "fg_pit_IFFB%", fill=0.10)
+    features["fg_pit_pull_pct"] = _safe_col(df, "fg_pit_Pull%", fill=0.40)
+    features["fg_pit_soft_pct"] = _safe_col(df, "fg_pit_Soft%", fill=0.16)
+    features["fg_pit_hard_pct"] = _safe_col(df, "fg_pit_Hard%", fill=0.31)
+    # Pitch type values
+    features["fg_pit_wfb_c"] = _safe_col(df, "fg_pit_wFB/C")
+    features["fg_pit_wsl_c"] = _safe_col(df, "fg_pit_wSL/C")
+    features["fg_pit_wch_c"] = _safe_col(df, "fg_pit_wCH/C")
+    # Role
+    features["fg_pit_gs"] = _safe_col(df, "fg_pit_GS")
+    features["fg_pit_start_ip"] = _safe_col(df, "fg_pit_Start-IP")
+    features["fg_pit_relief_ip"] = _safe_col(df, "fg_pit_Relief-IP")
+    # Value
+    features["fg_pit_war"] = _safe_col(df, "fg_pit_WAR")
+    features["fg_pit_clutch"] = _safe_col(df, "fg_pit_Clutch")
+    features["fg_pit_wpa"] = _safe_col(df, "fg_pit_WPA")
+    features["fg_pit_gmli"] = _safe_col(df, "fg_pit_gmLI", fill=1.0)
+
+    # --- FanGraphs batter season stats (joined by batter + game_year) ---
+    # Core
+    features["fg_bat_woba"] = _safe_col(df, "fg_bat_wOBA", fill=0.30)
+    features["fg_bat_xwoba"] = _safe_col(df, "fg_bat_xwOBA", fill=0.30)
+    features["fg_bat_wrc_plus"] = _safe_col(df, "fg_bat_wRC+", fill=100)
+    features["fg_bat_ops"] = _safe_col(df, "fg_bat_OPS", fill=0.70)
+    features["fg_bat_iso"] = _safe_col(df, "fg_bat_ISO", fill=0.14)
+    features["fg_bat_babip"] = _safe_col(df, "fg_bat_BABIP", fill=0.29)
+    # Plate discipline
+    features["fg_bat_k_pct"] = _safe_col(df, "fg_bat_K%", fill=0.22)
+    features["fg_bat_bb_pct"] = _safe_col(df, "fg_bat_BB%", fill=0.08)
+    features["fg_bat_o_swing"] = _safe_col(df, "fg_bat_O-Swing%", fill=0.32)
+    features["fg_bat_z_swing"] = _safe_col(df, "fg_bat_Z-Swing%", fill=0.69)
+    features["fg_bat_o_contact"] = _safe_col(df, "fg_bat_O-Contact%", fill=0.61)
+    features["fg_bat_z_contact"] = _safe_col(df, "fg_bat_Z-Contact%", fill=0.86)
+    features["fg_bat_zone"] = _safe_col(df, "fg_bat_Zone%", fill=0.43)
+    features["fg_bat_swstr"] = _safe_col(df, "fg_bat_SwStr%", fill=0.11)
+    features["fg_bat_contact"] = _safe_col(df, "fg_bat_Contact%", fill=0.76)
+    # Batted ball
+    features["fg_bat_gb_pct"] = _safe_col(df, "fg_bat_GB%", fill=0.43)
+    features["fg_bat_fb_pct"] = _safe_col(df, "fg_bat_FB%", fill=0.38)
+    features["fg_bat_ld_pct"] = _safe_col(df, "fg_bat_LD%", fill=0.20)
+    features["fg_bat_iffb_pct"] = _safe_col(df, "fg_bat_IFFB%", fill=0.10)
+    features["fg_bat_hr_fb"] = _safe_col(df, "fg_bat_HR/FB", fill=0.11)
+    features["fg_bat_pull_pct"] = _safe_col(df, "fg_bat_Pull%", fill=0.40)
+    features["fg_bat_soft_pct"] = _safe_col(df, "fg_bat_Soft%", fill=0.16)
+    features["fg_bat_hard_pct"] = _safe_col(df, "fg_bat_Hard%", fill=0.38)
+    features["fg_bat_hardhit"] = _safe_col(df, "fg_bat_HardHit%", fill=0.38)
+    # Pitch type values
+    features["fg_bat_wfb_c"] = _safe_col(df, "fg_bat_wFB/C")
+    features["fg_bat_wsl_c"] = _safe_col(df, "fg_bat_wSL/C")
+    features["fg_bat_wch_c"] = _safe_col(df, "fg_bat_wCH/C")
+    # Speed & baserunning
+    features["fg_bat_spd"] = _safe_col(df, "fg_bat_Spd", fill=4.0)
+    features["fg_bat_bsr"] = _safe_col(df, "fg_bat_BsR")
+    # Value
+    features["fg_bat_war"] = _safe_col(df, "fg_bat_WAR")
+    features["fg_bat_off"] = _safe_col(df, "fg_bat_Off")
+    features["fg_bat_def"] = _safe_col(df, "fg_bat_Def")
+    features["fg_bat_clutch"] = _safe_col(df, "fg_bat_Clutch")
+    features["fg_bat_wpa"] = _safe_col(df, "fg_bat_WPA")
+    features["fg_bat_wraa"] = _safe_col(df, "fg_bat_wRAA")
+
     # --- Lineup / fatigue ---
     features["n_thruorder"] = _safe_col(df, "n_thruorder_pitcher", fill=1)
     features["n_priorpa"] = _safe_col(df, "n_priorpa_thisgame_player_at_bat")
@@ -342,12 +427,145 @@ def main():
     except Exception as e:
         print(f"  Park factors not available: {e}")
 
+    # Merge FanGraphs season-level stats (batting + pitching)
+    print("\nLoading FanGraphs stats...")
+    data_dir = Path(args.output_dir)
+    for tdf in [train_df, test_df]:
+        if "pitcher" in tdf.columns:
+            tdf["pitcher"] = tdf["pitcher"].astype(float)
+        if "batter" in tdf.columns:
+            tdf["batter"] = tdf["batter"].astype(float)
+        if "game_year" in tdf.columns:
+            tdf["game_year"] = tdf["game_year"].astype(float)
+
+    # --- Pitching stats ---
+    try:
+        pit_path = data_dir / "fg_pitching.csv"
+        if pit_path.exists():
+            pit_df = pd.read_csv(pit_path)
+        else:
+            bq_client = get_bq_client()
+            pit_df = bq_client.query(
+                f"SELECT * FROM `{PROJECT}.{DATASET}.fg_pitching_stats`"
+            ).to_dataframe()
+            pit_df.to_csv(pit_path, index=False)
+
+        if len(pit_df) > 0:
+            # Prefix FG columns to avoid collision with Statcast columns
+            skip = {"player_id", "Name", "season"}
+            rename_map = {c: f"fg_pit_{c}" for c in pit_df.columns if c not in skip}
+            pit_df = pit_df.rename(columns=rename_map)
+            pit_df = pit_df.rename(columns={"player_id": "pitcher", "season": "game_year"})
+            pit_df["pitcher"] = pit_df["pitcher"].astype(float)
+            pit_df["game_year"] = pit_df["game_year"].astype(float)
+            pit_df = pit_df.drop(columns=["Name"], errors="ignore")
+
+            train_df = train_df.merge(pit_df, on=["pitcher", "game_year"], how="left")
+            test_df = test_df.merge(pit_df, on=["pitcher", "game_year"], how="left")
+            fg_cols = [c for c in train_df.columns if c.startswith("fg_pit_")]
+            matched = train_df[fg_cols[0]].notna().sum() if fg_cols else 0
+            print(f"  Pitching: {len(fg_cols)} cols, {matched:,}/{len(train_df):,} "
+                  f"({matched/len(train_df)*100:.1f}%) matched")
+    except Exception as e:
+        print(f"  FG pitching not available: {e}")
+
+    # --- Batting stats ---
+    try:
+        bat_path = data_dir / "fg_batting.csv"
+        if bat_path.exists():
+            bat_df = pd.read_csv(bat_path)
+        else:
+            bq_client = get_bq_client()
+            bat_df = bq_client.query(
+                f"SELECT * FROM `{PROJECT}.{DATASET}.fg_batting_stats`"
+            ).to_dataframe()
+            bat_df.to_csv(bat_path, index=False)
+
+        if len(bat_df) > 0:
+            skip = {"player_id", "Name", "season"}
+            rename_map = {c: f"fg_bat_{c}" for c in bat_df.columns if c not in skip}
+            bat_df = bat_df.rename(columns=rename_map)
+            bat_df = bat_df.rename(columns={"player_id": "batter", "season": "game_year"})
+            bat_df["batter"] = bat_df["batter"].astype(float)
+            bat_df["game_year"] = bat_df["game_year"].astype(float)
+            bat_df = bat_df.drop(columns=["Name"], errors="ignore")
+
+            train_df = train_df.merge(bat_df, on=["batter", "game_year"], how="left")
+            test_df = test_df.merge(bat_df, on=["batter", "game_year"], how="left")
+            fg_cols = [c for c in train_df.columns if c.startswith("fg_bat_")]
+            matched = train_df[fg_cols[0]].notna().sum() if fg_cols else 0
+            print(f"  Batting: {len(fg_cols)} cols, {matched:,}/{len(train_df):,} "
+                  f"({matched/len(train_df)*100:.1f}%) matched")
+    except Exception as e:
+        print(f"  FG batting not available: {e}")
+
     # Engineer features
     print("\nEngineering features...")
     X_train, feature_names = engineer_features(train_df)
     X_test, _ = engineer_features(test_df)
     y_train = get_target(train_df)
     y_test = get_target(test_df)
+
+    # === Coverage & NaN Report ===
+    print(f"\n{'='*60}")
+    print(f"FEATURE COVERAGE & NaN REPORT ({len(feature_names)} features)")
+    print(f"{'='*60}")
+    n_train = X_train.shape[0]
+    n_test = X_test.shape[0]
+
+    # Group features
+    groups = {
+        "Statcast/game-state": [i for i, n in enumerate(feature_names) if not n.startswith("fg_")],
+        "FG pitcher": [i for i, n in enumerate(feature_names) if n.startswith("fg_pit_")],
+        "FG batter": [i for i, n in enumerate(feature_names) if n.startswith("fg_bat_")],
+    }
+    for group, indices in groups.items():
+        if not indices:
+            continue
+        # NaN count in train
+        nan_train = sum(np.isnan(X_train[:, i]).sum() for i in indices)
+        nan_test = sum(np.isnan(X_test[:, i]).sum() for i in indices)
+        # Zero count (features that are all default/0)
+        all_zero = sum(1 for i in indices if np.all(X_train[:, i] == 0))
+        all_default = sum(1 for i in indices
+                         if np.std(X_train[:, i]) == 0 and len(indices) > 0)
+        print(f"\n  {group} ({len(indices)} features):")
+        print(f"    Train NaN: {nan_train} / {n_train * len(indices)} "
+              f"({nan_train / (n_train * len(indices)) * 100:.2f}%)")
+        print(f"    Test NaN: {nan_test} / {n_test * len(indices)} "
+              f"({nan_test / (n_test * len(indices)) * 100:.2f}%)")
+        print(f"    All-zero features: {all_zero}")
+        print(f"    Zero-variance features: {all_default}")
+
+    # Per-feature NaN report for FG features (non-zero NaN only)
+    fg_indices = groups["FG pitcher"] + groups["FG batter"]
+    fg_nan_features = []
+    for i in fg_indices:
+        nan_pct = np.isnan(X_train[:, i]).mean() * 100
+        if nan_pct > 0:
+            fg_nan_features.append((feature_names[i], nan_pct))
+    if fg_nan_features:
+        print(f"\n  FG features with NaN (train):")
+        for name, pct in sorted(fg_nan_features, key=lambda x: -x[1])[:20]:
+            print(f"    {name:<30} {pct:5.1f}%")
+    else:
+        print(f"\n  All FG features: 0% NaN ✓")
+
+    # Year-by-year FG match rate
+    if "game_year" in train_df.columns:
+        fg_pit_col = next((c for c in train_df.columns if c.startswith("fg_pit_")), None)
+        fg_bat_col = next((c for c in train_df.columns if c.startswith("fg_bat_")), None)
+        if fg_pit_col or fg_bat_col:
+            print(f"\n  Year-by-year FG match rate (train):")
+            print(f"  {'Year':<6} {'Pitches':>10} {'PitMatch':>10} {'BatMatch':>10}")
+            for yr in sorted(train_df["game_year"].unique()):
+                mask = train_df["game_year"] == yr
+                n = mask.sum()
+                pit_m = train_df.loc[mask, fg_pit_col].notna().sum() if fg_pit_col else 0
+                bat_m = train_df.loc[mask, fg_bat_col].notna().sum() if fg_bat_col else 0
+                print(f"  {int(yr):<6} {n:>10,} {pit_m/n*100:>9.1f}% {bat_m/n*100:>9.1f}%")
+
+    print(f"{'='*60}")
 
     print(f"  Features: {len(feature_names)}")
     print(f"  Train: {X_train.shape}")
