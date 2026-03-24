@@ -473,73 +473,6 @@ def main():
             print("  CatBoost not installed, skipping")
 
     # -------------------------------------------------------
-    # Quantile Regression LightGBM (prediction intervals)
-    # -------------------------------------------------------
-    quantile_results = {}
-    quantile_alphas = [0.05, 0.50, 0.95]
-
-    print(f"\n{'=' * 60}")
-    print(f"Quantile Regression LightGBM ({len(feature_names)} features)")
-    print(f"{'=' * 60}")
-
-    for alpha in quantile_alphas:
-        q_params = {
-            "objective": "quantile",
-            "alpha": alpha,
-            "metric": "quantile",
-            "learning_rate": 0.03,
-            "num_leaves": 127,
-            "max_depth": 10,
-            "min_child_samples": 200,
-            "feature_fraction": 0.7,
-            "bagging_fraction": 0.7,
-            "bagging_freq": 5,
-            "reg_alpha": 0.1,
-            "reg_lambda": 1.0,
-            "verbose": -1,
-            "seed": 42,
-        }
-        q_td = lgb.Dataset(X_train, y_train, feature_name=feature_names)
-        q_vd = lgb.Dataset(X_test, y_test, feature_name=feature_names, reference=q_td)
-        q_model = lgb.train(
-            q_params, q_td, 3000, valid_sets=[q_vd],
-            callbacks=[lgb.log_evaluation(0), lgb.early_stopping(100)])
-
-        q_preds = np.clip(q_model.predict(X_test), 0.001, 0.999)
-
-        # Per-quantile diagnostics
-        if alpha == 0.50:
-            q_brier = float(np.mean((q_preds - y_test) ** 2))
-            print(f"  q={alpha:.2f} (median): mean={q_preds.mean():.4f}, "
-                  f"Brier={q_brier:.6f}, iters={q_model.best_iteration}")
-            quantile_results["median_brier"] = round(q_brier, 6)
-        else:
-            print(f"  q={alpha:.2f}: mean={q_preds.mean():.4f}, "
-                  f"iters={q_model.best_iteration}")
-
-        # Save model
-        q_path = output_dir / f"wp_statcast_q{alpha:.2f}.txt"
-        q_model.save_model(str(q_path))
-        quantile_results[f"q{alpha:.2f}_mean"] = round(float(q_preds.mean()), 4)
-
-    # Coverage of 90% interval (q0.05 to q0.95)
-    q05_path = output_dir / "wp_statcast_q0.05.txt"
-    q95_path = output_dir / "wp_statcast_q0.95.txt"
-    if q05_path.exists() and q95_path.exists():
-        q05_model = lgb.Booster(model_file=str(q05_path))
-        q95_model = lgb.Booster(model_file=str(q95_path))
-        lo = np.clip(q05_model.predict(X_test), 0.001, 0.999)
-        hi = np.clip(q95_model.predict(X_test), 0.001, 0.999)
-        coverage_90 = float(((y_test >= lo) & (y_test <= hi)).mean())
-        mean_width = float((hi - lo).mean())
-        print(f"\n  90% interval coverage: {coverage_90:.4f} (target 0.90)")
-        print(f"  Mean interval width: {mean_width:.4f}")
-        quantile_results["coverage_90"] = round(coverage_90, 4)
-        quantile_results["mean_width_90"] = round(mean_width, 4)
-
-    print(f"  Saved: {[f'wp_statcast_q{a:.2f}.txt' for a in quantile_alphas]}")
-
-    # -------------------------------------------------------
     # Comparison
     # -------------------------------------------------------
     print(f"\n{'=' * 60}")
@@ -564,9 +497,6 @@ def main():
         if mlb_metrics:
             cb_vs_mlb = (mlb_brier - cb_metrics["brier"]) / mlb_brier * 100
             print(f"  CatBoost vs MLB benchmark: {cb_vs_mlb:+.2f}% Brier")
-
-    if quantile_results:
-        results["quantile"] = quantile_results
 
     # Save
     results_path = output_dir / "wp_statcast_results.json"

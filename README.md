@@ -409,13 +409,13 @@ gh workflow run "Validate WP Model" \
 - [x] **Conformal Prediction（2024 ホールドアウト 182K plays、90% coverage 90.01%）**
 - [ ] Streamlit アプリ統合（リプレイ + ライブ表示）
 
-### Phase 2c: Statcast 予測区間 + アンサンブル 🔄（現在）
+### Phase 2c: Statcast 予測区間 + アンサンブル ✅
 - [x] ~~NumPyro 階層モデル（game-state のみ）→ Brier 0.1648、Statcast 未使用のため不採用~~
 - [x] ~~NGBoost Bernoulli → 二値分類では p(1-p) しか出ず認識論的不確実性なし~~
-- [x] **Quantile Regression LightGBM**（q=0.05/0.50/0.95、Statcast 58 特徴量で状況依存の予測区間）
+- [x] ~~Quantile Regression LightGBM → 二値ターゲット（0/1）では分位点が 0 or 1 に収束、不適合~~
+- [x] **Conformal Prediction 正式採用**（Split Conformal、2024 ホールドアウト 182K plays、90% coverage 90.01%）
 - [x] **アンサンブル**（v1+v2+Statcast、inverse-Brier 加重、Brier 0.1609、`Train Ensemble WP` ワークフロー）
 - [x] Streamlit エンジン比較セクション（v1 / Statcast / Ensemble + 90% 区間表示）
-- [ ] **Quantile Regression 初回学習結果待ち**（Run 23472156241）
 - [ ] 本番アンサンブル確定（最良エンジン構成を決定）
 
 ### Phase 3: AI Commentary 🔄（現在）

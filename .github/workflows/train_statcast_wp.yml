@@ -110,18 +110,6 @@ jobs:
           fi = r['lgbm'].get('feature_importance', {})
           for n, v in sorted(fi.items(), key=lambda x: -x[1])[:15]:
               print(f'| {n} | {v:.1f} |')
-          qr = r.get('quantile')
-          if qr:
-              print()
-              print('### Quantile Regression (Prediction Intervals)')
-              print(f'| Metric | Value |')
-              print(f'|--------|-------|')
-              if 'median_brier' in qr:
-                  print(f'| Median Brier | {qr[\"median_brier\"]} |')
-              if 'coverage_90' in qr:
-                  print(f'| 90% Coverage | {qr[\"coverage_90\"]} |')
-              if 'mean_width_90' in qr:
-                  print(f'| Mean Width | {qr[\"mean_width_90\"]} |')
           " >> $GITHUB_STEP_SUMMARY
           fi
 
