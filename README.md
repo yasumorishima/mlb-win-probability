@@ -395,7 +395,6 @@ gh workflow run "Validate WP Model" \
 - [x] v2 エンジン構築（10 年分実データ WP テーブル + Markov Chain フォールバック）
 - [x] LightGBM(state) エンジン構築（25 特徴量、Optuna 最適化）
 - [x] 3 エンジン比較パイプライン（GitHub Actions、BQ → 自動比較）
-- [x] アンサンブル実装（inverse-Brier 加重、+1.14% vs v1 単体）
 - [x] Isotonic Regression キャリブレーション補正
 - [x] Leave-one-year-out CV（2015–2024、全 10 年で一貫して改善）
 
@@ -407,16 +406,16 @@ gh workflow run "Validate WP Model" \
 - [x] **LightGBM Optuna 50 trial 完了（Brier 0.1544、ベンチマーク比 +1.90%）**
 - [x] **ランタイムエンジン実装（`win_probability_statcast.py`）**
 - [x] **MLB Stats API から投球・打球データ取得（リアルタイム + リプレイ対応）**
-- [x] **Conformal Prediction（2024 ホールドアウト 182K plays、90%/95% 信用区間）**
+- [x] **Conformal Prediction（2024 ホールドアウト 182K plays、90% coverage 90.01%）**
 - [ ] Streamlit アプリ統合（リプレイ + ライブ表示）
 
-### Phase 2c: Statcast ベイズ + アンサンブル 🔄（現在）
-- [x] ~~旧: NumPyro 階層モデル（game-state のみ）→ Brier 0.1648、Statcast 未使用のため不採用~~
-- [x] ~~旧: NGBoost Bernoulli → 二値分類では p(1-p) しか出ず不確実性の追加価値なし~~
-- [x] Quantile Regression LightGBM（q=0.05/0.50/0.95、Statcast 58 特徴量で状況依存の予測区間）
-- [x] アンサンブル学習ワークフロー（`Train Ensemble WP`、inverse-Brier 加重平均 + Isotonic 補正）
-- [x] Streamlit エンジン比較セクション（v1 / Statcast / Ensemble 並列表示）
-- [ ] **Quantile Regression 初回学習結果待ち**
+### Phase 2c: Statcast 予測区間 + アンサンブル 🔄（現在）
+- [x] ~~NumPyro 階層モデル（game-state のみ）→ Brier 0.1648、Statcast 未使用のため不採用~~
+- [x] ~~NGBoost Bernoulli → 二値分類では p(1-p) しか出ず認識論的不確実性なし~~
+- [x] **Quantile Regression LightGBM**（q=0.05/0.50/0.95、Statcast 58 特徴量で状況依存の予測区間）
+- [x] **アンサンブル**（v1+v2+Statcast、inverse-Brier 加重、Brier 0.1609、`Train Ensemble WP` ワークフロー）
+- [x] Streamlit エンジン比較セクション（v1 / Statcast / Ensemble + 90% 区間表示）
+- [ ] **Quantile Regression 初回学習結果待ち**（Run 23472156241）
 - [ ] 本番アンサンブル確定（最良エンジン構成を決定）
 
 ### Phase 3: AI Commentary 🔄（現在）
