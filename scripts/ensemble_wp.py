@@ -169,6 +169,49 @@ def predict_catboost(states: list[dict], data_dir: Path) -> np.ndarray | None:
         return None
 
 
+def predict_statcast(states: list[dict], data_dir: Path) -> np.ndarray | None:
+    """Generate predictions using Statcast LightGBM model.
+
+    Uses game-state features only (no pitch/hit data) for ensemble evaluation.
+    Batch-builds feature matrix for speed (~100x faster than per-row predict).
+    In live mode, pitch/hit data improves accuracy further.
+    """
+    model_path = data_dir / "wp_statcast_lgbm.txt"
+    if not model_path.exists():
+        return None
+    try:
+        import lightgbm as lgb
+        from win_probability_statcast import WPEngineStatcast
+
+        engine = WPEngineStatcast()
+        if not engine.is_loaded:
+            return None
+
+        # Batch build features — bypass per-row predict() overhead
+        features = []
+        for s in states:
+            gs = {
+                "inning": s["inning"],
+                "top_bottom": "bottom" if s["half_inning"] == "bottom" else "top",
+                "outs": s["outs"],
+                "runners": s["runners"],
+                "score_diff": s["score_diff"],
+                "balls": 0, "strikes": 0,
+            }
+            features.append(engine._build_features(gs, None, None))
+
+        X = np.array(features, dtype=np.float32)
+        preds = engine._model.predict(X)
+        return np.clip(preds, 0.001, 0.999)
+
+    except ImportError:
+        print("  LightGBM not installed (for Statcast)")
+        return None
+    except Exception as e:
+        print(f"  Statcast prediction failed: {e}")
+        return None
+
+
 def predict_bayesian(states: list[dict], data_dir: Path,
                      ) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
     """Generate predictions using Bayesian hierarchical model.
@@ -338,6 +381,11 @@ def main():
                 engine_preds["lgbm"] = lgbm_preds
                 engine_briers["lgbm"] = compute_brier(lgbm_preds, actuals)
 
+            statcast_preds = predict_statcast(test_states, data_dir)
+            if statcast_preds is not None:
+                engine_preds["statcast"] = statcast_preds
+                engine_briers["statcast"] = compute_brier(statcast_preds, actuals)
+
             # Ensemble (raw)
             ens_preds = ensemble_predictions(engine_preds, engine_briers)
             ens_brier = compute_brier(ens_preds, actuals)
@@ -373,12 +421,13 @@ def main():
         print("CROSS-VALIDATION SUMMARY")
         print(f"{'=' * 70}")
         print(f"{'Year':<8} {'v1':>10} {'v2':>10} {'lgbm':>10} "
-              f"{'ensemble':>10} {'calibrated':>10}")
-        print("-" * 60)
+              f"{'statcast':>10} {'ensemble':>10} {'calibrated':>10}")
+        print("-" * 70)
         for r in cv_results:
             row = f"{r['year']:<8} {r['engines']['v1']:>10.6f}"
             row += f" {r['engines'].get('v2', float('nan')):>10.6f}"
             row += f" {r['engines'].get('lgbm', float('nan')):>10.6f}"
+            row += f" {r['engines'].get('statcast', float('nan')):>10.6f}"
             row += f" {r['ensemble_brier']:>10.6f}"
             row += f" {r['calibrated_brier']:>10.6f}"
             print(row)
@@ -465,7 +514,7 @@ def main():
         else:
             print("  SKIP: Bayesian not available")
 
-        print("\n[lgbm] LightGBM...")
+        print("\n[lgbm] LightGBM (state)...")
         lgbm_preds = predict_lgbm(test_states, data_dir)
         if lgbm_preds is not None:
             engine_preds["lgbm"] = lgbm_preds
@@ -473,7 +522,18 @@ def main():
             lgbm_ece = compute_ece(lgbm_preds, actuals)
             print(f"  Brier: {engine_briers['lgbm']:.6f} | ECE: {lgbm_ece:.4f}")
         else:
-            print("  SKIP: LightGBM not available")
+            print("  SKIP: LightGBM (state) not available")
+
+        print("\n[statcast] LightGBM (Statcast)...")
+        statcast_preds = predict_statcast(test_states, data_dir)
+        if statcast_preds is not None:
+            engine_preds["statcast"] = statcast_preds
+            engine_briers["statcast"] = compute_brier(statcast_preds, actuals)
+            statcast_ece = compute_ece(statcast_preds, actuals)
+            print(f"  Brier: {engine_briers['statcast']:.6f} | ECE: {statcast_ece:.4f}")
+            print("  (game-state only — live mode with pitch/hit data will be better)")
+        else:
+            print("  SKIP: Statcast not available")
 
         # Ensemble
         print(f"\n{'=' * 60}")
@@ -506,6 +566,10 @@ def main():
         train_lgbm = predict_lgbm(train_states, data_dir)
         if train_lgbm is not None:
             train_engine_preds["lgbm"] = train_lgbm
+
+        train_statcast = predict_statcast(train_states, data_dir)
+        if train_statcast is not None:
+            train_engine_preds["statcast"] = train_statcast
 
         train_ens = ensemble_predictions(train_engine_preds, engine_briers)
 

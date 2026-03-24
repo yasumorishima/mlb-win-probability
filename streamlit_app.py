@@ -7,6 +7,7 @@ Standalone — no CSV data needed, pure math engine.
 
 import os
 import time
+from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 import plotly.graph_objects as go
@@ -677,6 +678,50 @@ try:
 except Exception:
     pass
 
+# Statcast WP (game-state only in standalone mode)
+statcast_wp = None
+try:
+    from win_probability_statcast import WPEngineStatcast
+    _statcast_engine = WPEngineStatcast()
+    if _statcast_engine.is_loaded:
+        _gs = {
+            "inning": inning,
+            "top_bottom": top_bottom,
+            "outs": outs,
+            "runners": runners,
+            "score_diff": score_diff,
+            "balls": 0, "strikes": 0,
+        }
+        _statcast_result = _statcast_engine.predict(_gs)
+        if _statcast_result:
+            statcast_wp = _statcast_result.wp
+except Exception:
+    pass
+
+# Ensemble WP (inverse-Brier weighted)
+ensemble_wp = None
+try:
+    _ensemble_weights_path = Path(__file__).parent / "data" / "ensemble_weights.json"
+    if _ensemble_weights_path.exists():
+        import json as _json
+        _ew = _json.loads(_ensemble_weights_path.read_text())
+        _weights = _ew.get("weights", {})
+        _engine_wps = {"v1": wp}
+        if statcast_wp is not None:
+            _engine_wps["statcast"] = statcast_wp
+        if bayes_ci is not None:
+            _engine_wps["bayesian"] = bayes_ci.wp
+        # Weighted average of available engines
+        _total_w = sum(_weights.get(n, 0) for n in _engine_wps)
+        if _total_w > 0:
+            ensemble_wp = sum(
+                _engine_wps[n] * _weights.get(n, 0)
+                for n in _engine_wps
+            ) / _total_w
+            ensemble_wp = max(0.01, min(0.99, ensemble_wp))
+except Exception:
+    pass
+
 st.markdown("---")
 
 
@@ -814,6 +859,37 @@ with col_li:
     {_['li_desc']}
     </div>
     """, unsafe_allow_html=True)
+
+
+# ============================================================
+# Engine Comparison
+# ============================================================
+
+_has_multi_engines = statcast_wp is not None or ensemble_wp is not None
+if _has_multi_engines:
+    _eng_title = "Engine Comparison" if lang == "EN" else "エンジン比較"
+    st.markdown(f"### {_eng_title}")
+
+    _eng_rows = [("v1 (Markov+Normal)", wp)]
+    if bayes_ci is not None:
+        _eng_rows.append(("Bayesian", bayes_ci.wp))
+    if statcast_wp is not None:
+        _eng_rows.append(("Statcast LightGBM", statcast_wp))
+    if ensemble_wp is not None:
+        _eng_rows.append(("**Ensemble**", ensemble_wp))
+
+    _eng_cols = st.columns(len(_eng_rows))
+    for _ei, (_ename, _ewp) in enumerate(_eng_rows):
+        with _eng_cols[_ei]:
+            _ecolor = "#4caf50" if _ewp > 0.55 else "#ff9800" if _ewp > 0.45 else "#f44336"
+            _is_ens = "Ensemble" in _ename
+            _border = f"border: 2px solid #00e5ff;" if _is_ens else ""
+            st.markdown(f"""
+            <div class="metric-card" style="text-align: center; {_border}">
+                <div style="font-size: 1.8rem; font-weight: bold; color: {_ecolor};">{_ewp * 100:.1f}%</div>
+                <div style="font-size: 0.9rem; color: #aaa; margin-top: 4px;">{_ename}</div>
+            </div>
+            """, unsafe_allow_html=True)
 
 
 # ============================================================
