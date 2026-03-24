@@ -317,6 +317,20 @@ def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     features["fg_bat_wpa"] = _safe_col(df, "fg_bat_WPA")
     features["fg_bat_wraa"] = _safe_col(df, "fg_bat_wRAA")
 
+    # --- Statcast baserunning (batter sprint speed, joined by batter + season) ---
+    features["sc_bat_sprint_speed"] = _safe_col(df, "sc_bat_sprint_speed", fill=27.0)
+    features["sc_bat_hp_to_1b"] = _safe_col(df, "sc_bat_hp_to_1b", fill=4.4)
+    features["sc_bat_bolts"] = _safe_col(df, "sc_bat_bolts")
+
+    # --- Statcast catcher (joined by fielder_2 + season) ---
+    features["sc_c_pop_2b"] = _safe_col(df, "sc_c_pop_2b_sba", fill=2.0)
+    features["sc_c_arm_strength"] = _safe_col(df, "sc_c_maxeff_arm_2b_3b_sba", fill=80.0)
+    features["sc_c_exchange"] = _safe_col(df, "sc_c_exchange_2b_3b_sba", fill=0.75)
+
+    # --- Statcast team fielding OAA (joined by fielding team + season) ---
+    features["sc_team_total_oaa"] = _safe_col(df, "sc_team_total_oaa")
+    features["sc_team_avg_oaa"] = _safe_col(df, "sc_team_avg_oaa")
+
     # --- Lineup / fatigue ---
     features["n_thruorder"] = _safe_col(df, "n_thruorder_pitcher", fill=1)
     features["n_priorpa"] = _safe_col(df, "n_priorpa_thisgame_player_at_bat")
@@ -499,6 +513,131 @@ def main():
     except Exception as e:
         print(f"  FG batting not available: {e}")
 
+    # --- Sprint speed (join on batter + game_year) ---
+    print("\nLoading Statcast sprint speed...")
+    try:
+        sprint_path = data_dir / "statcast_sprint_speed.csv"
+        if sprint_path.exists():
+            sprint_df = pd.read_csv(sprint_path)
+        else:
+            bq_client = get_bq_client()
+            sprint_df = bq_client.query(
+                f"SELECT * FROM `{PROJECT}.{DATASET}.statcast_sprint_speed`"
+            ).to_dataframe()
+            sprint_df.to_csv(sprint_path, index=False)
+
+        if len(sprint_df) > 0:
+            # Keep key columns for join
+            sprint_keep = ["player_id", "season", "sprint_speed", "hp_to_1b", "bolts"]
+            sprint_keep = [c for c in sprint_keep if c in sprint_df.columns]
+            sprint_join = sprint_df[sprint_keep].copy()
+            # Prefix columns
+            rename_map = {c: f"sc_bat_{c}" for c in sprint_join.columns
+                          if c not in ("player_id", "season")}
+            sprint_join = sprint_join.rename(columns=rename_map)
+            sprint_join = sprint_join.rename(
+                columns={"player_id": "batter", "season": "game_year"})
+            sprint_join["batter"] = sprint_join["batter"].astype(float)
+            sprint_join["game_year"] = sprint_join["game_year"].astype(float)
+
+            train_df = train_df.merge(sprint_join, on=["batter", "game_year"], how="left")
+            test_df = test_df.merge(sprint_join, on=["batter", "game_year"], how="left")
+            sc_cols = [c for c in train_df.columns if c.startswith("sc_bat_")]
+            matched = train_df[sc_cols[0]].notna().sum() if sc_cols else 0
+            print(f"  Sprint: {len(sc_cols)} cols, {matched:,}/{len(train_df):,} "
+                  f"({matched/len(train_df)*100:.1f}%) matched")
+    except Exception as e:
+        print(f"  Sprint speed not available: {e}")
+
+    # --- Catcher stats (join on fielder_2 + game_year) ---
+    print("\nLoading Statcast catcher stats...")
+    try:
+        catcher_path = data_dir / "statcast_catcher.csv"
+        if catcher_path.exists():
+            catcher_df = pd.read_csv(catcher_path)
+        else:
+            bq_client = get_bq_client()
+            catcher_df = bq_client.query(
+                f"SELECT * FROM `{PROJECT}.{DATASET}.statcast_catcher`"
+            ).to_dataframe()
+            catcher_df.to_csv(catcher_path, index=False)
+
+        if len(catcher_df) > 0:
+            catcher_keep = ["player_id", "season",
+                            "pop_2b_sba", "maxeff_arm_2b_3b_sba", "exchange_2b_3b_sba"]
+            catcher_keep = [c for c in catcher_keep if c in catcher_df.columns]
+            catcher_join = catcher_df[catcher_keep].copy()
+            rename_map = {c: f"sc_c_{c}" for c in catcher_join.columns
+                          if c not in ("player_id", "season")}
+            catcher_join = catcher_join.rename(columns=rename_map)
+            # Join on fielder_2 (catcher position)
+            catcher_join = catcher_join.rename(
+                columns={"player_id": "fielder_2", "season": "game_year"})
+            catcher_join["fielder_2"] = catcher_join["fielder_2"].astype(float)
+            catcher_join["game_year"] = catcher_join["game_year"].astype(float)
+
+            train_df = train_df.merge(catcher_join, on=["fielder_2", "game_year"], how="left")
+            test_df = test_df.merge(catcher_join, on=["fielder_2", "game_year"], how="left")
+            sc_cols = [c for c in train_df.columns if c.startswith("sc_c_")]
+            matched = train_df[sc_cols[0]].notna().sum() if sc_cols else 0
+            print(f"  Catcher: {len(sc_cols)} cols, {matched:,}/{len(train_df):,} "
+                  f"({matched/len(train_df)*100:.1f}%) matched")
+    except Exception as e:
+        print(f"  Catcher stats not available: {e}")
+
+    # --- Team OAA (join on fielding team + game_year) ---
+    print("\nLoading Statcast team OAA...")
+    try:
+        team_oaa_path = data_dir / "statcast_team_oaa.csv"
+        if team_oaa_path.exists():
+            team_oaa_df = pd.read_csv(team_oaa_path)
+        else:
+            bq_client = get_bq_client()
+            team_oaa_df = bq_client.query(
+                f"SELECT * FROM `{PROJECT}.{DATASET}.statcast_team_oaa`"
+            ).to_dataframe()
+            team_oaa_df.to_csv(team_oaa_path, index=False)
+
+        if len(team_oaa_df) > 0:
+            # Determine fielding team: top of inning = home fields, bottom = away fields
+            for tdf in [train_df, test_df]:
+                is_bot = tdf.get("is_bottom", tdf.get("inning_topbot", ""))
+                if "inning_topbot" in tdf.columns:
+                    tdf["fielding_team"] = np.where(
+                        tdf["inning_topbot"] == "Bot",
+                        tdf.get("away_team", ""),
+                        tdf.get("home_team", ""))
+                elif "is_bottom" in tdf.columns:
+                    tdf["fielding_team"] = np.where(
+                        tdf["is_bottom"] == 1,
+                        tdf.get("away_team", ""),
+                        tdf.get("home_team", ""))
+
+            # Use team_abbrev if available, else team_name
+            join_col = "team_abbrev" if "team_abbrev" in team_oaa_df.columns else "team_name"
+            oaa_join = team_oaa_df[[join_col, "season", "total_oaa", "avg_oaa"]].copy()
+            oaa_join = oaa_join.rename(columns={
+                join_col: "fielding_team",
+                "season": "game_year",
+                "total_oaa": "sc_team_total_oaa",
+                "avg_oaa": "sc_team_avg_oaa",
+            })
+            oaa_join["game_year"] = oaa_join["game_year"].astype(float)
+
+            for tdf_name, tdf in [("train", train_df), ("test", test_df)]:
+                if "fielding_team" in tdf.columns:
+                    before = len(tdf)
+                    merged = tdf.merge(oaa_join, on=["fielding_team", "game_year"], how="left")
+                    matched = merged["sc_team_total_oaa"].notna().sum()
+                    print(f"  Team OAA ({tdf_name}): {matched:,}/{before:,} "
+                          f"({matched/before*100:.1f}%) matched")
+                    if tdf_name == "train":
+                        train_df = merged
+                    else:
+                        test_df = merged
+    except Exception as e:
+        print(f"  Team OAA not available: {e}")
+
     # Engineer features
     print("\nEngineering features...")
     X_train, feature_names = engineer_features(train_df)
@@ -515,9 +654,11 @@ def main():
 
     # Group features
     groups = {
-        "Statcast/game-state": [i for i, n in enumerate(feature_names) if not n.startswith("fg_")],
+        "Statcast/game-state": [i for i, n in enumerate(feature_names)
+                                if not n.startswith(("fg_", "sc_"))],
         "FG pitcher": [i for i, n in enumerate(feature_names) if n.startswith("fg_pit_")],
         "FG batter": [i for i, n in enumerate(feature_names) if n.startswith("fg_bat_")],
+        "SC fielding/running": [i for i, n in enumerate(feature_names) if n.startswith("sc_")],
     }
     for group, indices in groups.items():
         if not indices:

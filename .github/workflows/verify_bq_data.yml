@@ -40,7 +40,8 @@ jobs:
           print('=' * 60)
           print('BQ TABLE SUMMARY')
           print('=' * 60)
-          for tn in ['statcast_pitches', 'fg_batting_stats', 'fg_pitching_stats', 'play_states']:
+          for tn in ['statcast_pitches', 'fg_batting_stats', 'fg_pitching_stats', 'play_states',
+                     'statcast_sprint_speed', 'statcast_oaa', 'statcast_team_oaa', 'statcast_catcher']:
               try:
                   t = client.get_table(f'{PROJECT}.mlb_wp.{tn}')
                   print(f'  {tn}: {t.num_rows:,} rows, {len(t.schema)} cols, {t.num_bytes/1024**3:.2f} GB')

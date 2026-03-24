@@ -75,6 +75,12 @@ FEATURE_NAMES = [
     "fg_bat_spd", "fg_bat_bsr",
     "fg_bat_war", "fg_bat_off", "fg_bat_def",
     "fg_bat_clutch", "fg_bat_wpa", "fg_bat_wraa",
+    # Statcast baserunning (3)
+    "sc_bat_sprint_speed", "sc_bat_hp_to_1b", "sc_bat_bolts",
+    # Statcast catcher (3)
+    "sc_c_pop_2b", "sc_c_arm_strength", "sc_c_exchange",
+    # Statcast team fielding OAA (2)
+    "sc_team_total_oaa", "sc_team_avg_oaa",
     # Lineup/fatigue + nonlinear + park + clipped (8)
     "n_thruorder", "n_priorpa",
     "score_diff_sq", "inning_sq", "speed_sq", "launch_speed_sq",
@@ -420,6 +426,23 @@ class WPEngineStatcast:
         fg_bat_wpa = fg_bat.get("wpa", 0.0)
         fg_bat_wraa = fg_bat.get("wraa", 0.0)
 
+        # Statcast baserunning (batter sprint speed)
+        sc_run = gs.get("sc_bat", {})
+        sc_bat_sprint_speed = sc_run.get("sprint_speed", 27.0)
+        sc_bat_hp_to_1b = sc_run.get("hp_to_1b", 4.4)
+        sc_bat_bolts = sc_run.get("bolts", 0.0)
+
+        # Statcast catcher metrics
+        sc_catch = gs.get("sc_catcher", {})
+        sc_c_pop_2b = sc_catch.get("pop_2b", 2.0)
+        sc_c_arm_strength = sc_catch.get("arm_strength", 80.0)
+        sc_c_exchange = sc_catch.get("exchange", 0.75)
+
+        # Statcast team fielding OAA
+        sc_team = gs.get("sc_team", {})
+        sc_team_total_oaa = sc_team.get("total_oaa", 0.0)
+        sc_team_avg_oaa = sc_team.get("avg_oaa", 0.0)
+
         # Order MUST match engineer_features() in train_wp_statcast.py
         return [
             inning, is_bottom, outs, balls, strikes,
@@ -469,6 +492,12 @@ class WPEngineStatcast:
             fg_bat_spd, fg_bat_bsr,
             fg_bat_war, fg_bat_off, fg_bat_def,
             fg_bat_clutch, fg_bat_wpa, fg_bat_wraa,
+            # Statcast baserunning (3)
+            sc_bat_sprint_speed, sc_bat_hp_to_1b, sc_bat_bolts,
+            # Statcast catcher (3)
+            sc_c_pop_2b, sc_c_arm_strength, sc_c_exchange,
+            # Statcast team fielding OAA (2)
+            sc_team_total_oaa, sc_team_avg_oaa,
             # Lineup/fatigue + nonlinear + park + clipped
             n_thruorder, n_priorpa,
             score_diff_sq, inning_sq, speed_sq, launch_speed_sq,
