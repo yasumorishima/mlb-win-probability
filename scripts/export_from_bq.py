@@ -1,11 +1,13 @@
 """
 Export play-by-play data from BigQuery to local CSVs.
 
-Replaces slow MLB Stats API fetching with instant BQ export.
-Falls back gracefully if BQ is unavailable.
+Exports two datasets:
+  1. play_states — all game state transitions (for v1/v2/ensemble evaluation)
+  2. statcast_pitches — at-bat outcomes with pitch/hit features (for Statcast model)
 
 Usage:
   python scripts/export_from_bq.py [--output-dir data/]
+  python scripts/export_from_bq.py --output-dir data/ --statcast
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from pathlib import Path
 PROJECT = "data-platform-490901"
 DATASET = "mlb_wp"
 TABLE = "play_states"
+STATCAST_TABLE = "statcast_pitches"
 
 FIELDNAMES = [
     "game_pk", "date", "home_team", "away_team", "home_won",
@@ -28,6 +31,21 @@ FIELDNAMES = [
     "home_score", "away_score", "score_diff",
     "home_score_after", "away_score_after", "event",
 ]
+
+
+def _get_bq_client():
+    """Get authenticated BigQuery client."""
+    from google.cloud import bigquery
+
+    sa_key = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+    gcp_sa_key = os.environ.get("GCP_SA_KEY")
+
+    if gcp_sa_key and not sa_key:
+        key_path = Path("/tmp/gcp-sa-key.json")
+        key_path.write_text(gcp_sa_key)
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(key_path)
+
+    return bigquery.Client(project=PROJECT)
 
 
 def export_from_bq(output_dir: Path) -> bool:
@@ -41,18 +59,8 @@ def export_from_bq(output_dir: Path) -> bool:
         print("google-cloud-bigquery not installed")
         return False
 
-    # Check for credentials
-    sa_key = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-    gcp_sa_key = os.environ.get("GCP_SA_KEY")
-
-    if gcp_sa_key and not sa_key:
-        # Write SA key to temp file (GitHub Actions pattern)
-        key_path = Path("/tmp/gcp-sa-key.json")
-        key_path.write_text(gcp_sa_key)
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = str(key_path)
-
     try:
-        client = bigquery.Client(project=PROJECT)
+        client = _get_bq_client()
 
         # Get available years
         query = f"""
@@ -92,11 +100,76 @@ def export_from_bq(output_dir: Path) -> bool:
         return False
 
 
+def export_statcast_from_bq(output_dir: Path) -> bool:
+    """Export statcast_pitches (at-bat outcomes) from BigQuery, split by year.
+
+    Exports all columns needed by engineer_features() in train_wp_statcast.py.
+    Used by ensemble and Bayesian training to provide real Statcast features.
+
+    Returns True if successful, False if BQ is unavailable.
+    """
+    try:
+        from google.cloud import bigquery
+    except ImportError:
+        print("google-cloud-bigquery not installed")
+        return False
+
+    try:
+        client = _get_bq_client()
+
+        query = f"""
+            SELECT DISTINCT game_year
+            FROM `{PROJECT}.{DATASET}.{STATCAST_TABLE}`
+            WHERE game_type = 'R' AND events IS NOT NULL
+            ORDER BY game_year
+        """
+        years = [row.game_year for row in client.query(query).result()]
+        print(f"BQ statcast_pitches years: {years}")
+
+        total_rows = 0
+        for year in years:
+            csv_path = output_dir / f"statcast_pitches_{year}.csv"
+
+            query = f"""
+                SELECT
+                    game_pk, game_year, home_team,
+                    inning, inning_topbot, outs_when_up, balls, strikes,
+                    on_1b, on_2b, on_3b,
+                    home_score, away_score, score_diff, is_bottom,
+                    post_home_score, post_away_score,
+                    release_speed, effective_speed, pfx_x, pfx_z,
+                    plate_x, plate_z, release_spin_rate, release_extension,
+                    launch_speed, launch_angle, hit_distance_sc,
+                    estimated_woba_using_speedangle, estimated_ba_using_speedangle,
+                    woba_value, bb_type, zone,
+                    bat_speed, swing_length,
+                    n_thruorder_pitcher, n_priorpa_thisgame_player_at_bat,
+                    home_win_exp, events
+                FROM `{PROJECT}.{DATASET}.{STATCAST_TABLE}`
+                WHERE game_type = 'R' AND events IS NOT NULL
+                  AND game_year = {year}
+                ORDER BY game_pk, inning, is_bottom, outs_when_up
+            """
+            df = client.query(query).to_dataframe()
+            df.to_csv(csv_path, index=False)
+            print(f"  {year}: {len(df):,} at-bats -> {csv_path}")
+            total_rows += len(df)
+
+        print(f"Total: {total_rows:,} at-bat outcomes exported from BigQuery")
+        return True
+
+    except Exception as e:
+        print(f"BQ statcast export failed: {e}")
+        return False
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(
         description="Export play-by-play from BigQuery to CSV")
     parser.add_argument("--output-dir", default="data/")
+    parser.add_argument("--statcast", action="store_true",
+                        help="Also export statcast_pitches (at-bat outcomes)")
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
@@ -106,6 +179,11 @@ def main():
     if not success:
         print("BQ export failed — use fetch_game_states.py as fallback")
         sys.exit(1)
+
+    if args.statcast:
+        statcast_ok = export_statcast_from_bq(output_dir)
+        if not statcast_ok:
+            print("WARNING: Statcast export failed (ensemble will use game-state fallback)")
 
 
 if __name__ == "__main__":

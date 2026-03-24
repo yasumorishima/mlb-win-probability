@@ -40,11 +40,11 @@ jobs:
           echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json" >> $GITHUB_ENV
 
-      - name: Export play states from BQ
+      - name: Export play states + statcast from BQ
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
         run: |
-          python scripts/export_from_bq.py --output-dir data/
+          python scripts/export_from_bq.py --output-dir data/ --statcast
 
       - name: Download Statcast model from latest release
         run: |

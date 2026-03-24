@@ -42,6 +42,7 @@ def load_play_states(csv_path: Path) -> list[dict]:
         for row in reader:
             try:
                 states.append({
+                    "game_pk": int(row.get("game_pk", 0)),
                     "inning": int(row["inning"]),
                     "half_inning": row["half_inning"],
                     "outs": int(row["outs"]),
@@ -169,12 +170,91 @@ def predict_catboost(states: list[dict], data_dir: Path) -> np.ndarray | None:
         return None
 
 
+def _load_statcast_csvs(data_dir: Path, years: list[int] | None = None,
+                        ) -> "pd.DataFrame | None":
+    """Load statcast_pitches CSVs as a pandas DataFrame.
+
+    Returns None if no statcast CSVs found.
+    """
+    try:
+        import pandas as pd
+    except ImportError:
+        return None
+
+    csvs = sorted(data_dir.glob("statcast_pitches_*.csv"))
+    if not csvs:
+        return None
+
+    dfs = []
+    for c in csvs:
+        year = int(c.stem.split("_")[-1])
+        if years and year not in years:
+            continue
+        dfs.append(pd.read_csv(c))
+
+    if not dfs:
+        return None
+
+    df = pd.concat(dfs, ignore_index=True)
+    print(f"  Loaded {len(df):,} at-bat outcomes from statcast CSVs")
+    return df
+
+
+def _build_statcast_lookup(df: "pd.DataFrame", model_path: Path,
+                           ) -> dict[tuple, float]:
+    """Build a lookup of game state -> WP prediction with real Statcast features.
+
+    Key: (game_pk, inning, is_bottom, outs, score_diff, r1, r2, r3)
+    Including runners makes the key nearly unique per at-bat within a game.
+
+    Uses engineer_features() from train_wp_statcast to build real features,
+    then predicts with the Statcast LightGBM model.
+    """
+    import lightgbm as lgb
+    import pandas as pd
+    from scripts.train_wp_statcast import engineer_features
+
+    model = lgb.Booster(model_file=str(model_path))
+    X, feature_names = engineer_features(df)
+    preds = np.clip(model.predict(X), 0.001, 0.999)
+
+    is_bottom = (
+        df["is_bottom"].values if "is_bottom" in df.columns
+        else (df["inning_topbot"] == "Bot").astype(int).values
+    )
+    score_diff = (
+        df["score_diff"].values if "score_diff" in df.columns
+        else (df["home_score"] - df["away_score"]).values
+    )
+    # Convert runner IDs (or NaN) to 0/1
+    r1 = df["on_1b"].notna().astype(int).values if "on_1b" in df.columns else np.zeros(len(df), dtype=int)
+    r2 = df["on_2b"].notna().astype(int).values if "on_2b" in df.columns else np.zeros(len(df), dtype=int)
+    r3 = df["on_3b"].notna().astype(int).values if "on_3b" in df.columns else np.zeros(len(df), dtype=int)
+
+    lookup = {}
+    for i in range(len(df)):
+        key = (
+            int(df["game_pk"].iloc[i]),
+            int(df["inning"].iloc[i]),
+            int(is_bottom[i]),
+            int(df["outs_when_up"].iloc[i]),
+            int(score_diff[i]),
+            int(r1[i]), int(r2[i]), int(r3[i]),
+        )
+        lookup[key] = float(preds[i])
+
+    n_collisions = len(df) - len(lookup)
+    print(f"  Statcast lookup: {len(lookup):,} unique states "
+          f"({n_collisions:,} collisions), mean WP={np.mean(preds):.4f}")
+    return lookup
+
+
 def predict_statcast(states: list[dict], data_dir: Path) -> np.ndarray | None:
     """Generate predictions using Statcast LightGBM model.
 
-    Uses game-state features only (no pitch/hit data) for ensemble evaluation.
-    Batch-builds feature matrix for speed (~100x faster than per-row predict).
-    In live mode, pitch/hit data improves accuracy further.
+    If statcast_pitches CSVs are available, uses real pitch/hit features
+    for at-bat plays (joined by game state). Falls back to game-state-only
+    prediction for non-AB plays.
     """
     model_path = data_dir / "wp_statcast_lgbm.txt"
     if not model_path.exists():
@@ -187,28 +267,57 @@ def predict_statcast(states: list[dict], data_dir: Path) -> np.ndarray | None:
         if not engine.is_loaded:
             return None
 
-        # Batch build features — bypass per-row predict() overhead
-        features = []
-        for s in states:
-            gs = {
-                "inning": s["inning"],
-                "top_bottom": "bottom" if s["half_inning"] == "bottom" else "top",
-                "outs": s["outs"],
-                "runners": s["runners"],
-                "score_diff": s["score_diff"],
-                "balls": 0, "strikes": 0,
-            }
-            features.append(engine._build_features(gs, None, None))
+        # Try to load real statcast features
+        statcast_df = _load_statcast_csvs(data_dir)
+        lookup = None
+        if statcast_df is not None:
+            lookup = _build_statcast_lookup(statcast_df, model_path)
 
-        X = np.array(features, dtype=np.float32)
-        preds = engine._model.predict(X)
-        return np.clip(preds, 0.001, 0.999)
+        # Predict for each play state
+        preds = np.zeros(len(states))
+        n_matched = 0
+        for i, s in enumerate(states):
+            is_bottom = 1 if s["half_inning"] == "bottom" else 0
+            r1, r2, r3 = s["runners"]
+            game_pk = s.get("game_pk", 0)
+            key = (game_pk, s["inning"], is_bottom, s["outs"],
+                   s["score_diff"], r1, r2, r3)
 
-    except ImportError:
-        print("  LightGBM not installed (for Statcast)")
+            if lookup and key in lookup:
+                preds[i] = lookup[key]
+                n_matched += 1
+            else:
+                # Fallback: game-state-only prediction
+                gs = {
+                    "inning": s["inning"],
+                    "top_bottom": "bottom" if is_bottom else "top",
+                    "outs": s["outs"],
+                    "runners": s["runners"],
+                    "score_diff": s["score_diff"],
+                    "balls": 0, "strikes": 0,
+                }
+                feat = engine._build_features(gs, None, None)
+                preds[i] = engine._model.predict(
+                    np.array([feat], dtype=np.float32))[0]
+
+        preds = np.clip(preds, 0.001, 0.999)
+
+        if lookup:
+            pct = n_matched / len(states) * 100 if states else 0
+            print(f"  Statcast: {n_matched:,}/{len(states):,} matched "
+                  f"({pct:.1f}%) with real features")
+        else:
+            print("  (game-state only — no statcast CSVs found)")
+
+        return preds
+
+    except ImportError as e:
+        print(f"  LightGBM/pandas not installed (for Statcast): {e}")
         return None
     except Exception as e:
         print(f"  Statcast prediction failed: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 

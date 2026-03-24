@@ -43,11 +43,11 @@ jobs:
           echo "$GCP_SA_KEY" > /tmp/gcp-sa-key.json
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json" >> $GITHUB_ENV
 
-      - name: Export play_states from BigQuery
+      - name: Export play_states + statcast from BigQuery
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
         run: |
-          python scripts/export_from_bq.py --output-dir data/
+          python scripts/export_from_bq.py --output-dir data/ --statcast
 
       - name: Download Statcast LightGBM model
         env:

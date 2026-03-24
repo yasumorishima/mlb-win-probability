@@ -108,6 +108,7 @@ def load_play_states(data_dir: Path,
                         continue
 
                     all_states.append({
+                        "game_pk": int(row.get("game_pk", 0)),
                         "year": year,
                         "inning": int(row["inning"]),
                         "half_inning": row["half_inning"],
@@ -204,8 +205,13 @@ def compute_leverage_index(inning: int, half: str, outs: int,
 
 def _compute_statcast_base_wp(states: list[dict],
                                statcast_model_path: Path | None = None,
+                               data_dir: Path | None = None,
                                ) -> np.ndarray | None:
-    """Compute base WP using Statcast LightGBM model (batch prediction).
+    """Compute base WP using Statcast LightGBM model with real features.
+
+    If statcast_pitches CSVs are in data_dir, uses real pitch/hit features
+    for at-bat plays (joined by game state). Falls back to game-state-only
+    prediction for non-matched plays and to Markov WP if model unavailable.
 
     Returns predicted WP array, or None if model not available.
     """
@@ -214,40 +220,103 @@ def _compute_statcast_base_wp(states: list[dict],
 
     try:
         import lightgbm as lgb
-        sys.path.insert(0, str(Path(__file__).parent.parent))
-        from win_probability_statcast import WPEngineStatcast, FEATURE_NAMES
+        import pandas as pd
+        from scripts.train_wp_statcast import engineer_features
 
         model = lgb.Booster(model_file=str(statcast_model_path))
-        if model.num_feature() != len(FEATURE_NAMES):
-            print(f"  WARNING: Statcast model has {model.num_feature()} features, "
-                  f"expected {len(FEATURE_NAMES)}")
-            return None
 
-        # Build feature vectors using WPEngineStatcast's feature builder
+        # Try to load real statcast features
+        lookup = None
+        if data_dir is not None:
+            csvs = sorted(data_dir.glob("statcast_pitches_*.csv"))
+            if csvs:
+                dfs = [pd.read_csv(c) for c in csvs]
+                sc_df = pd.concat(dfs, ignore_index=True)
+                print(f"  Loaded {len(sc_df):,} at-bat outcomes from statcast CSVs")
+
+                X, _ = engineer_features(sc_df)
+                sc_preds = np.clip(model.predict(X), 0.005, 0.995)
+
+                # Build lookup with runners for near-unique keys
+                # Key: (game_pk, inning, is_bottom, outs, score_diff, r1, r2, r3)
+                is_bottom = (
+                    sc_df["is_bottom"].values if "is_bottom" in sc_df.columns
+                    else (sc_df["inning_topbot"] == "Bot").astype(int).values
+                )
+                score_diff = (
+                    sc_df["score_diff"].values if "score_diff" in sc_df.columns
+                    else (sc_df["home_score"] - sc_df["away_score"]).values
+                )
+                sc_r1 = sc_df["on_1b"].notna().astype(int).values if "on_1b" in sc_df.columns else np.zeros(len(sc_df), dtype=int)
+                sc_r2 = sc_df["on_2b"].notna().astype(int).values if "on_2b" in sc_df.columns else np.zeros(len(sc_df), dtype=int)
+                sc_r3 = sc_df["on_3b"].notna().astype(int).values if "on_3b" in sc_df.columns else np.zeros(len(sc_df), dtype=int)
+
+                lookup = {}
+                for i in range(len(sc_df)):
+                    key = (
+                        int(sc_df["game_pk"].iloc[i]),
+                        int(sc_df["inning"].iloc[i]),
+                        int(is_bottom[i]),
+                        int(sc_df["outs_when_up"].iloc[i]),
+                        int(score_diff[i]),
+                        int(sc_r1[i]), int(sc_r2[i]), int(sc_r3[i]),
+                    )
+                    lookup[key] = float(sc_preds[i])
+
+                n_collisions = len(sc_df) - len(lookup)
+                print(f"  Statcast lookup: {len(lookup):,} unique states "
+                      f"({n_collisions:,} collisions)")
+
+        # Game-state-only fallback engine
+        sys.path.insert(0, str(Path(__file__).parent.parent))
+        from win_probability_statcast import WPEngineStatcast
         engine = WPEngineStatcast.__new__(WPEngineStatcast)
-        features = []
-        for s in states:
-            gs = {
-                "inning": s["inning"],
-                "top_bottom": "bottom" if s["half_inning"] == "bottom" else "top",
-                "outs": s["outs"],
-                "runners": (s["r1"], s["r2"], s["r3"]),
-                "score_diff": s["score_diff"],
-                "balls": 0, "strikes": 0,
-            }
-            features.append(engine._build_features(gs, None, None))
+        engine._model = model
+        engine._loaded = True
 
-        X = np.array(features, dtype=np.float32)
-        preds = np.clip(model.predict(X), 0.005, 0.995).astype(np.float32)
+        # Predict for each play state
+        preds = np.zeros(len(states), dtype=np.float32)
+        n_matched = 0
+        for i, s in enumerate(states):
+            is_bot = 1 if s["half_inning"] == "bottom" else 0
+            game_pk = s.get("game_pk", 0)
+            key = (game_pk, s["inning"], is_bot, s["outs"], s["score_diff"],
+                   s["r1"], s["r2"], s["r3"])
+
+            if lookup and key in lookup:
+                preds[i] = lookup[key]
+                n_matched += 1
+            else:
+                # Fallback: game-state-only prediction
+                gs = {
+                    "inning": s["inning"],
+                    "top_bottom": "bottom" if is_bot else "top",
+                    "outs": s["outs"],
+                    "runners": (s["r1"], s["r2"], s["r3"]),
+                    "score_diff": s["score_diff"],
+                    "balls": 0, "strikes": 0,
+                }
+                feat = engine._build_features(gs, None, None)
+                preds[i] = model.predict(
+                    np.array([feat], dtype=np.float32))[0]
+
+        preds = np.clip(preds, 0.005, 0.995).astype(np.float32)
+
+        if lookup:
+            pct = n_matched / len(states) * 100 if states else 0
+            print(f"  Statcast base WP: {n_matched:,}/{len(states):,} matched "
+                  f"({pct:.1f}%) with real features")
         print(f"  Statcast LightGBM base: mean={preds.mean():.4f}, "
               f"std={preds.std():.4f}")
         return preds
 
-    except ImportError:
-        print("  LightGBM not installed, falling back to Markov WP")
+    except ImportError as e:
+        print(f"  LightGBM/pandas not installed, falling back to Markov WP: {e}")
         return None
     except Exception as e:
         print(f"  Statcast model load failed: {e}, falling back to Markov WP")
+        import traceback
+        traceback.print_exc()
         return None
 
 
@@ -277,6 +346,7 @@ def _compute_markov_wp(inning, is_bottom, outs, r1, r2, r3, score_diff):
 def prepare_arrays(states: list[dict],
                     year_to_idx: dict[int, int] | None = None,
                     statcast_model_path: Path | None = None,
+                    data_dir: Path | None = None,
                     ) -> dict[str, np.ndarray]:
     """Convert play states to numpy arrays for NumPyro (vectorized).
 
@@ -288,6 +358,7 @@ def prepare_arrays(states: list[dict],
         statcast_model_path: Path to Statcast LightGBM model file.
             If provided and valid, uses Statcast predictions as base WP.
             Falls back to Markov WP if unavailable.
+        data_dir: Directory containing statcast_pitches CSVs for real features.
     """
     n = len(states)
     if year_to_idx is None:
@@ -316,7 +387,8 @@ def prepare_arrays(states: list[dict],
     y = np.array([s["home_won"] for s in states], dtype=np.float32)
 
     # --- Base WP: Statcast LightGBM (preferred) or Markov (fallback) ---
-    base_wp = _compute_statcast_base_wp(states, statcast_model_path)
+    base_wp = _compute_statcast_base_wp(states, statcast_model_path,
+                                         data_dir=data_dir)
     use_statcast = base_wp is not None
 
     if base_wp is None:
@@ -727,13 +799,15 @@ def main():
         print("  Statcast model not found, will use Markov WP fallback")
 
     train_arrays = prepare_arrays(train_states,
-                                   statcast_model_path=statcast_path)
+                                   statcast_model_path=statcast_path,
+                                   data_dir=data_dir)
 
     # Test uses train's year_to_idx so season effects align correctly.
     # 2024 (test year) maps to last season index (extrapolation from 2023).
     train_year_to_idx = {y: i for i, y in enumerate(train_arrays["years"])}
     test_arrays = prepare_arrays(test_states, year_to_idx=train_year_to_idx,
-                                  statcast_model_path=statcast_path)
+                                  statcast_model_path=statcast_path,
+                                  data_dir=data_dir)
 
     # Use train normalization for test leverage
     test_arrays["leverage_norm"] = (
