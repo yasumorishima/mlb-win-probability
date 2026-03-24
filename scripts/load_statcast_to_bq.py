@@ -44,8 +44,14 @@ def _add_computed_columns(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _convert_types(df: pd.DataFrame) -> pd.DataFrame:
-    """Convert types for BQ compatibility."""
-    # String columns — force to str to avoid Int64/Arrow type errors
+    """Convert types for BQ compatibility.
+
+    Key issues:
+    - pandas nullable Int64 → ArrowTypeError (pyarrow can't convert <NA>)
+    - Mixed str/int columns (sv_id) → schema mismatch across years
+    - .astype(str) turns pd.NA into "<NA>" string → BQ rejects
+    """
+    # String columns — must be object dtype with None (not <NA>)
     str_cols = [
         "sv_id", "game_date", "des", "description",
         "pitch_type", "pitch_name", "events", "bb_type", "type",
@@ -55,9 +61,13 @@ def _convert_types(df: pd.DataFrame) -> pd.DataFrame:
     ]
     for col in str_cols:
         if col in df.columns:
-            df[col] = df[col].astype(str).replace("nan", None)
+            # Convert non-null values to str, keep null as None
+            mask = df[col].notna()
+            df[col] = df[col].astype(object)
+            df.loc[mask, col] = df.loc[mask, col].astype(str)
+            df.loc[~mask, col] = None
 
-    # Convert numeric columns
+    # Numeric columns — force to float64 (handles NaN cleanly)
     numeric_cols = [
         "inning", "outs_when_up", "balls", "strikes",
         "home_score", "away_score", "bat_score", "fld_score",
@@ -73,11 +83,13 @@ def _convert_types(df: pd.DataFrame) -> pd.DataFrame:
     ]
     for col in numeric_cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
+            df[col] = pd.to_numeric(df[col], errors="coerce").astype("float64")
 
-    # Downcast nullable Int64 columns to float64 (Arrow compatibility)
+    # Any remaining nullable Int64 → float64 (Arrow compatibility)
     for col in df.columns:
-        if pd.api.types.is_integer_dtype(df[col]) and df[col].isna().any():
+        dtype_str = str(df[col].dtype)
+        if dtype_str in ("Int8", "Int16", "Int32", "Int64",
+                         "UInt8", "UInt16", "UInt32", "UInt64"):
             df[col] = df[col].astype("float64")
 
     return df
