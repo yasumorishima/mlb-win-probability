@@ -210,10 +210,13 @@ def _map_to_mlbam(df: pd.DataFrame) -> pd.DataFrame:
 
 def _clean_col_names_for_bq(df: pd.DataFrame) -> pd.DataFrame:
     """Clean column names for BQ compatibility (no /, %, +, spaces)."""
+    import re
     col_map = {}
     for c in df.columns:
         new = c.replace("/", "_").replace("%", "_pct").replace("+", "_plus")
-        new = new.replace(" ", "_").replace("-", "_")
+        new = new.replace(",", "").replace(" ", "_").replace("-", "_")
+        new = re.sub(r"[^a-zA-Z0-9_]", "_", new)
+        new = re.sub(r"_+", "_", new).strip("_")
         col_map[c] = new
     return df.rename(columns=col_map)
 
