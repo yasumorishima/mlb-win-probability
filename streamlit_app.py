@@ -874,7 +874,10 @@ if _has_multi_engines:
     if bayes_ci is not None:
         _eng_rows.append(("Bayesian", bayes_ci.wp))
     if statcast_wp is not None:
-        _eng_rows.append(("Statcast LightGBM", statcast_wp))
+        _sc_label = "Statcast LightGBM"
+        if _statcast_result and _statcast_result.wp_lower_90 is not None:
+            _sc_label += f" [{_statcast_result.wp_lower_90*100:.0f}–{_statcast_result.wp_upper_90*100:.0f}%]"
+        _eng_rows.append((_sc_label, statcast_wp))
     if ensemble_wp is not None:
         _eng_rows.append(("**Ensemble**", ensemble_wp))
 

@@ -13,8 +13,9 @@ Same feature engineering as train_wp_statcast.py to ensure consistency.
 
 from __future__ import annotations
 
+import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import numpy as np
@@ -49,6 +50,11 @@ class StatcastWPResult:
     features_used: int      # how many non-zero Statcast features
     has_pitch_data: bool
     has_hit_data: bool
+    # Conformal prediction intervals (if quantiles loaded)
+    wp_lower_90: float | None = None
+    wp_upper_90: float | None = None
+    wp_lower_95: float | None = None
+    wp_upper_95: float | None = None
 
 
 class WPEngineStatcast:
@@ -57,6 +63,7 @@ class WPEngineStatcast:
     def __init__(self):
         self._model = None
         self._loaded = False
+        self._conformal: dict = {}  # quantile label → q value
         self._load()
 
     def _load(self):
@@ -77,6 +84,16 @@ class WPEngineStatcast:
             pass
         except Exception as e:
             print(f"WARNING: Failed to load Statcast model: {e}")
+
+        # Load conformal quantiles if available
+        conformal_path = DATA_DIR / "conformal_quantiles.json"
+        if conformal_path.exists():
+            try:
+                cq = json.loads(conformal_path.read_text())
+                for label, info in cq.get("quantiles", {}).items():
+                    self._conformal[label] = info["q"]
+            except Exception:
+                pass
 
     @property
     def is_loaded(self) -> bool:
@@ -106,11 +123,19 @@ class WPEngineStatcast:
         wp = float(self._model.predict(X)[0])
         wp = max(0.001, min(0.999, wp))
 
+        # Conformal prediction intervals
+        q90 = self._conformal.get("90%")
+        q95 = self._conformal.get("95%")
+
         return StatcastWPResult(
             wp=wp,
             features_used=sum(1 for f in features[26:46] if f != 0),
             has_pitch_data=pitch_data is not None,
             has_hit_data=hit_data is not None,
+            wp_lower_90=max(0.0, wp - q90) if q90 else None,
+            wp_upper_90=min(1.0, wp + q90) if q90 else None,
+            wp_lower_95=max(0.0, wp - q95) if q95 else None,
+            wp_upper_95=min(1.0, wp + q95) if q95 else None,
         )
 
     def _build_features(self, gs: dict,

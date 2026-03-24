@@ -48,6 +48,24 @@ jobs:
             --test-year ${{ inputs.test_year }} \
             --n-trials ${{ inputs.n_trials }}
 
+      - name: Compute conformal prediction intervals
+        env:
+          GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+        run: |
+          if [ -f results/wp_statcast_lgbm.txt ]; then
+            # Export calibration data from BQ
+            pip install google-cloud-bigquery db-dtypes pyarrow 2>/dev/null
+            python scripts/export_from_bq.py --output-dir results/
+            # Copy model to data/ for WPEngineStatcast to find
+            mkdir -p data/
+            cp results/wp_statcast_lgbm.txt data/
+            # Compute conformal quantiles
+            python scripts/compute_conformal.py \
+              --data-dir results/ \
+              --output-dir results/ \
+              --cal-year ${{ inputs.test_year }}
+          fi
+
       - name: Upload results
         if: always()
         uses: actions/upload-artifact@v4
