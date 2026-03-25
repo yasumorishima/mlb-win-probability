@@ -445,7 +445,12 @@ gh workflow run "Validate WP Model" \
 - [ ] **Gemini API キー設定 + Streamlit Cloud 実動作確認**
 - [ ] プロンプト v3 改善（v2 の品質スコア分析結果ベース）
 
-### Phase 4: 統合デプロイ
+### Phase 4: データ基盤統合 🔄（現在）
+- [x] **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 構築**（baseball-mlops との共有 BQ データ基盤、`mlb_shared` データセット）
+- [ ] データ参照先を `mlb_wp` → `mlb_shared` に切り替え
+- [ ] 既存 `mlb_wp.statcast_pitches` を `mlb_shared.statcast_pitches` に移行
+
+### Phase 5: 統合デプロイ
 - [ ] 本番エンジン切り替え（アンサンブル or 最良エンジン）
 - [ ] Cloud Run 再デプロイ（アンサンブル + AI Commentary + BQML 統合）
 - [ ] W&B Dashboard 構築（品質スコア・Brier Score の時系列可視化）
