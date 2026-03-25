@@ -70,7 +70,7 @@ jobs:
           python -c "
           from google.cloud import bigquery
           client = bigquery.Client(project='data-platform-490901')
-          table = client.get_table('data-platform-490901.mlb_wp.statcast_pitches')
+          table = client.get_table('data-platform-490901.mlb_shared.statcast_pitches')
           print(f'Rows: {table.num_rows:,}')
           print(f'Columns: {len(table.schema)}')
           print(f'Size: {table.num_bytes / 1024**3:.2f} GB')
@@ -94,7 +94,7 @@ jobs:
           try:
               from google.cloud import bigquery
               client = bigquery.Client(project='data-platform-490901')
-              table = client.get_table('data-platform-490901.mlb_wp.statcast_pitches')
+              table = client.get_table('data-platform-490901.mlb_shared.statcast_pitches')
               print(f'| Metric | Value |')
               print(f'|--------|-------|')
               print(f'| Rows | {table.num_rows:,} |')
@@ -117,7 +117,7 @@ jobs:
             METRICS=$(python -c "
           from google.cloud import bigquery
           client = bigquery.Client(project='data-platform-490901')
-          table = client.get_table('data-platform-490901.mlb_wp.statcast_pitches')
+          table = client.get_table('data-platform-490901.mlb_shared.statcast_pitches')
           print(f'{table.num_rows:,} rows / {len(table.schema)} cols / {table.num_bytes / 1024**3:.2f} GB')
           " 2>/dev/null || echo "BQ query failed")
             BODY="**Reload Statcast BQ** ✅ ${{ inputs.start_year }}-${{ inputs.end_year }} (append=${{ inputs.append }}) | ${METRICS} | ${RUN_URL}"

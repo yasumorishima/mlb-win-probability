@@ -5,7 +5,7 @@ Loads year-by-year to avoid OOM (each year ~800MB, runner has 7GB RAM).
 First year uses WRITE_TRUNCATE, subsequent years WRITE_APPEND.
 
 Reads parquet files from data/statcast/ and loads into
-data-platform-490901.mlb_wp.statcast_pitches table.
+data-platform-490901.mlb_shared.statcast_pitches table.
 
 Usage:
   python scripts/load_statcast_to_bq.py --data-dir data/statcast/
@@ -20,7 +20,7 @@ from pathlib import Path
 import pandas as pd
 
 PROJECT = "data-platform-490901"
-DATASET = "mlb_wp"
+DATASET = "mlb_shared"
 TABLE = "statcast_pitches"
 
 

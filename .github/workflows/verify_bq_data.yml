@@ -40,13 +40,19 @@ jobs:
           print('=' * 60)
           print('BQ TABLE SUMMARY')
           print('=' * 60)
-          for tn in ['statcast_pitches', 'fg_batting_stats', 'fg_pitching_stats', 'play_states',
-                     'statcast_sprint_speed', 'statcast_oaa', 'statcast_team_oaa', 'statcast_catcher']:
+          table_ds = {
+              'statcast_pitches': 'mlb_shared',
+              'fg_batting_stats': 'mlb_wp', 'fg_pitching_stats': 'mlb_wp',
+              'play_states': 'mlb_wp',
+              'statcast_sprint_speed': 'mlb_wp', 'statcast_oaa': 'mlb_wp',
+              'statcast_team_oaa': 'mlb_wp', 'statcast_catcher': 'mlb_wp',
+          }
+          for tn, ds in table_ds.items():
               try:
-                  t = client.get_table(f'{PROJECT}.mlb_wp.{tn}')
-                  print(f'  {tn}: {t.num_rows:,} rows, {len(t.schema)} cols, {t.num_bytes/1024**3:.2f} GB')
+                  t = client.get_table(f'{PROJECT}.{ds}.{tn}')
+                  print(f'  {ds}.{tn}: {t.num_rows:,} rows, {len(t.schema)} cols, {t.num_bytes/1024**3:.2f} GB')
               except Exception as e:
-                  print(f'  {tn}: ERROR - {e}')
+                  print(f'  {ds}.{tn}: ERROR - {e}')
 
           print()
           print('=' * 60)
@@ -57,7 +63,7 @@ jobs:
             COUNT(*) AS total,
             COUNTIF(p.player_id IS NOT NULL) AS matched,
             ROUND(COUNTIF(p.player_id IS NOT NULL) / COUNT(*) * 100, 1) AS pct
-          FROM \`data-platform-490901.mlb_wp.statcast_pitches\` s
+          FROM \`data-platform-490901.mlb_shared.statcast_pitches\` s
           LEFT JOIN \`data-platform-490901.mlb_wp.fg_pitching_stats\` p
             ON CAST(s.pitcher AS INT64) = p.player_id
             AND CAST(s.game_year AS INT64) = CAST(p.season AS INT64)
@@ -79,7 +85,7 @@ jobs:
             COUNT(*) AS total,
             COUNTIF(b.player_id IS NOT NULL) AS matched,
             ROUND(COUNTIF(b.player_id IS NOT NULL) / COUNT(*) * 100, 1) AS pct
-          FROM \`data-platform-490901.mlb_wp.statcast_pitches\` s
+          FROM \`data-platform-490901.mlb_shared.statcast_pitches\` s
           LEFT JOIN \`data-platform-490901.mlb_wp.fg_batting_stats\` b
             ON CAST(s.batter AS INT64) = b.player_id
             AND CAST(s.game_year AS INT64) = CAST(b.season AS INT64)
@@ -110,11 +116,13 @@ jobs:
           print('=' * 60)
           print('JOIN KEY TYPE CHECK')
           print('=' * 60)
-          for tn, col in [('statcast_pitches','pitcher'), ('statcast_pitches','batter'),
+          key_checks = [('statcast_pitches','pitcher'), ('statcast_pitches','batter'),
                           ('statcast_pitches','game_year'),
                           ('fg_pitching_stats','player_id'), ('fg_pitching_stats','season'),
-                          ('fg_batting_stats','player_id'), ('fg_batting_stats','season')]:
-              t = client.get_table(f'{PROJECT}.mlb_wp.{tn}')
+                          ('fg_batting_stats','player_id'), ('fg_batting_stats','season')]
+          for tn, col in key_checks:
+              ds = 'mlb_shared' if tn == 'statcast_pitches' else 'mlb_wp'
+              t = client.get_table(f'{PROJECT}.{ds}.{tn}')
               for f in t.schema:
                   if f.name == col:
                       print(f'  {tn}.{col}: {f.field_type}')
@@ -129,7 +137,7 @@ jobs:
             COUNT(*) AS total,
             COUNTIF(sp.player_id IS NOT NULL) AS matched,
             ROUND(COUNTIF(sp.player_id IS NOT NULL) / COUNT(*) * 100, 1) AS pct
-          FROM \`data-platform-490901.mlb_wp.statcast_pitches\` s
+          FROM \`data-platform-490901.mlb_shared.statcast_pitches\` s
           LEFT JOIN \`data-platform-490901.mlb_wp.statcast_sprint_speed\` sp
             ON CAST(s.batter AS INT64) = CAST(sp.player_id AS INT64)
             AND CAST(s.game_year AS INT64) = CAST(sp.season AS INT64)
@@ -153,7 +161,7 @@ jobs:
             ROUND(COUNTIF(o.season IS NOT NULL) / COUNT(*) * 100, 1) AS pct
           FROM (
             SELECT *, CASE WHEN inning_topbot = \"Bot\" THEN away_team ELSE home_team END AS fielding_team
-            FROM \`data-platform-490901.mlb_wp.statcast_pitches\`
+            FROM \`data-platform-490901.mlb_shared.statcast_pitches\`
             WHERE game_type = \"R\" AND events IS NOT NULL
           ) s
           LEFT JOIN \`data-platform-490901.mlb_wp.statcast_team_oaa\` o
@@ -176,7 +184,7 @@ jobs:
             COUNT(*) AS total,
             COUNTIF(c.player_id IS NOT NULL) AS matched,
             ROUND(COUNTIF(c.player_id IS NOT NULL) / COUNT(*) * 100, 1) AS pct
-          FROM \`data-platform-490901.mlb_wp.statcast_pitches\` s
+          FROM \`data-platform-490901.mlb_shared.statcast_pitches\` s
           LEFT JOIN \`data-platform-490901.mlb_wp.statcast_catcher\` c
             ON CAST(s.fielder_2 AS INT64) = CAST(c.player_id AS INT64)
             AND CAST(s.game_year AS INT64) = CAST(c.season AS INT64)

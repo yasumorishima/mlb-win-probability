@@ -283,7 +283,7 @@ export WANDB_API_KEY="your-wandb-key"
 | Table | Rows | Description |
 |-------|------|-------------|
 | `mlb_wp.play_states` | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗） |
-| `mlb_wp.statcast_pitches` | 6,838,542 | **Statcast 全投球データ**（2015–2024、pybaseball 全 118 カラム + computed 4 = 122 列、4.77 GB） |
+| `mlb_shared.statcast_pitches` | 6,838,542 | **Statcast 全投球データ**（2015–2024、pybaseball 全 118 カラム + computed 4 = 122 列、4.77 GB）— [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理 |
 | `mlb_statcast.raw_park_factors` | 329 | 球場パークファクター（savant-extras） |
 | `mlb_wp.fg_batting_stats` | ~5,300 | **FanGraphs 打者シーズン成績**（wRC+/選球眼/打球傾向/走塁/WAR 等 40+ 指標、2015-2024） |
 | `mlb_wp.fg_pitching_stats` | ~4,300 | **FanGraphs 投手シーズン成績**（Stuff+/SIERA/ERA-/ゾーン制球/WAR 等 45+ 指標、2015-2024） |
@@ -332,7 +332,7 @@ BigQuery
 │     ↓                                                         │
 │   Leave-one-year-out CV (2015–2024)                          │
 │                                                               │
-├── mlb_wp.statcast_pitches (6.8M) ── Statcast engine ────────┘
+├── mlb_shared.statcast_pitches (6.8M) ── Statcast engine ───┘
 │     ↓ train_wp_statcast.py
 │   LightGBM(Statcast+FG, 157 features, Optuna)
 │     ↓
@@ -447,8 +447,9 @@ gh workflow run "Validate WP Model" \
 
 ### Phase 4: データ基盤統合 🔄（現在）
 - [x] **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 構築**（baseball-mlops との共有 BQ データ基盤、`mlb_shared` データセット）
-- [ ] データ参照先を `mlb_wp` → `mlb_shared` に切り替え
-- [ ] 既存 `mlb_wp.statcast_pitches` を `mlb_shared.statcast_pitches` に移行
+- [x] `statcast_pitches` 参照先を `mlb_shared` に切り替え
+- [x] `mlb_wp.statcast_pitches` → `mlb_shared.statcast_pitches` 移行
+- [ ] FG stats / fielding テーブルを `mlb_shared` に統合（テーブル名統一後）
 
 ### Phase 5: 統合デプロイ
 - [ ] 本番エンジン切り替え（アンサンブル or 最良エンジン）

@@ -20,7 +20,8 @@ from pathlib import Path
 
 
 PROJECT = "data-platform-490901"
-DATASET = "mlb_wp"
+DATASET_WP = "mlb_wp"             # play_states (WP-specific)
+DATASET_SHARED = "mlb_shared"     # statcast_pitches (shared via mlb-data-pipeline)
 TABLE = "play_states"
 STATCAST_TABLE = "statcast_pitches"
 
@@ -65,7 +66,7 @@ def export_from_bq(output_dir: Path) -> bool:
         # Get available years
         query = f"""
             SELECT DISTINCT CAST(SUBSTR(date, 1, 4) AS INT64) AS year
-            FROM `{PROJECT}.{DATASET}.{TABLE}`
+            FROM `{PROJECT}.{DATASET_WP}.{TABLE}`
             ORDER BY year
         """
         years = [row.year for row in client.query(query).result()]
@@ -77,7 +78,7 @@ def export_from_bq(output_dir: Path) -> bool:
 
             query = f"""
                 SELECT *
-                FROM `{PROJECT}.{DATASET}.{TABLE}`
+                FROM `{PROJECT}.{DATASET_WP}.{TABLE}`
                 WHERE STARTS_WITH(date, '{year}')
                 ORDER BY game_pk, play_idx
             """
@@ -119,7 +120,7 @@ def export_statcast_from_bq(output_dir: Path) -> bool:
 
         query = f"""
             SELECT DISTINCT game_year
-            FROM `{PROJECT}.{DATASET}.{STATCAST_TABLE}`
+            FROM `{PROJECT}.{DATASET_SHARED}.{STATCAST_TABLE}`
             WHERE game_type = 'R' AND events IS NOT NULL
             ORDER BY game_year
         """
@@ -132,7 +133,7 @@ def export_statcast_from_bq(output_dir: Path) -> bool:
 
             query = f"""
                 SELECT *
-                FROM `{PROJECT}.{DATASET}.{STATCAST_TABLE}`
+                FROM `{PROJECT}.{DATASET_SHARED}.{STATCAST_TABLE}`
                 WHERE game_type = 'R' AND events IS NOT NULL
                   AND game_year = {year}
                 ORDER BY game_pk, inning, is_bottom, outs_when_up

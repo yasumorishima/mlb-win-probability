@@ -25,7 +25,7 @@ from pybaseball import statcast
 YEARS = list(range(2015, 2026))  # 2015-2025
 DRIVE_DIR = Path("/content/drive/MyDrive/kaggle/mlb_wp/statcast/")
 BQ_PROJECT = "data-platform-490901"
-BQ_DATASET = "mlb_wp"
+BQ_DATASET = "mlb_shared"
 BQ_TABLE = "statcast_pitches"
 
 def fetch_and_save(year: int) -> Path | None:

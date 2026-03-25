@@ -31,7 +31,8 @@ from google.cloud import bigquery
 
 
 PROJECT = "data-platform-490901"
-DATASET = "mlb_wp"
+DATASET_SHARED = "mlb_shared"   # statcast_pitches (shared via mlb-data-pipeline)
+DATASET_WP = "mlb_wp"           # FG stats, fielding, etc. (WP-specific tables)
 TABLE = "statcast_pitches"
 
 
@@ -59,7 +60,7 @@ def load_from_bq(test_year: int = 2024) -> tuple[pd.DataFrame, pd.DataFrame]:
     # At-bat outcomes only (events IS NOT NULL) to reduce memory
     query = f"""
         SELECT *
-        FROM `{PROJECT}.{DATASET}.{TABLE}`
+        FROM `{PROJECT}.{DATASET_SHARED}.{TABLE}`
         WHERE game_type = 'R' AND events IS NOT NULL
         ORDER BY game_pk, inning, is_bottom, outs_when_up
     """
@@ -460,7 +461,7 @@ def main():
         else:
             bq_client = get_bq_client()
             pit_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET}.fg_pitching_stats`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.fg_pitching_stats`"
             ).to_dataframe()
             pit_df.to_csv(pit_path, index=False)
 
@@ -491,7 +492,7 @@ def main():
         else:
             bq_client = get_bq_client()
             bat_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET}.fg_batting_stats`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.fg_batting_stats`"
             ).to_dataframe()
             bat_df.to_csv(bat_path, index=False)
 
@@ -522,7 +523,7 @@ def main():
         else:
             bq_client = get_bq_client()
             sprint_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET}.statcast_sprint_speed`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.statcast_sprint_speed`"
             ).to_dataframe()
             sprint_df.to_csv(sprint_path, index=False)
 
@@ -558,7 +559,7 @@ def main():
         else:
             bq_client = get_bq_client()
             catcher_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET}.statcast_catcher`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.statcast_catcher`"
             ).to_dataframe()
             catcher_df.to_csv(catcher_path, index=False)
 
@@ -594,7 +595,7 @@ def main():
         else:
             bq_client = get_bq_client()
             team_oaa_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET}.statcast_team_oaa`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.statcast_team_oaa`"
             ).to_dataframe()
             team_oaa_df.to_csv(team_oaa_path, index=False)
 
