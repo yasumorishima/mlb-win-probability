@@ -17,7 +17,7 @@
 | **Bayesian Hierarchical** | NumPyro SVI — **Statcast LightGBM ベース** + チーム力・球場・時代効果 + **90% 信用区間** |
 
 5 エンジンを **inverse-Brier 加重アンサンブル** + **Isotonic Regression キャリブレーション**で統合。
-学習・検証データは BigQuery（`mlb_wp.play_states` 367K + `mlb_wp.statcast_pitches` 6.8M + `mlb_wp.fg_batting_stats` + `mlb_wp.fg_pitching_stats`）から取得。
+学習・検証データは BigQuery から取得。FanGraphs / Savant の共有データは **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline)**（`mlb_shared` データセット）で一元管理。
 
 ### Bayesian Hierarchical Model
 
@@ -277,6 +277,8 @@ export WANDB_API_KEY="your-wandb-key"
 ### データ基盤（BigQuery）
 
 全データは **BigQuery** に格納。学習・検証パイプラインは BQ から直接取得。
+
+> **共有データ基盤**: FanGraphs / Savant の生データは [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) で取得・管理し、`mlb_shared` データセットに格納。
 
 | Table | Rows | Description |
 |-------|------|-------------|
