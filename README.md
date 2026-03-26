@@ -76,7 +76,7 @@ streamlit run streamlit_app.py
 
 ## Grafana Dashboard
 
-[MLB Win Probability](https://yasumorishima.grafana.net/public-dashboards/8cf85d216d6e47068c3dcc7e807ac337) — Situation-based win expectancy analysis from 367K+ play states (2015–2024). Connected to BigQuery `data-platform-490901.mlb_wp`.
+[MLB Win Probability](https://yasumorishima.grafana.net/public-dashboards/8cf85d216d6e47068c3dcc7e807ac337) — Situation-based win expectancy analysis from 367K+ play states (2015–2024). Connected to BigQuery `data-platform-490901.mlb_shared` + `mlb_wp`.
 
 ![MLB Win Probability — Grafana Dashboard](docs/images/grafana-preview.png)
 
@@ -282,15 +282,18 @@ export WANDB_API_KEY="your-wandb-key"
 
 | Table | Rows | Description |
 |-------|------|-------------|
-| `mlb_wp.play_states` | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗） |
-| `mlb_shared.statcast_pitches` | 6,838,542 | **Statcast 全投球データ**（2015–2024、pybaseball 全 118 カラム + computed 4 = 122 列、4.77 GB）— [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理 |
-| `mlb_shared.park_factors` | 329 | 球場パークファクター（savant-extras）— [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理 |
-| `mlb_wp.fg_batting_stats` | ~5,300 | **FanGraphs 打者シーズン成績**（wRC+/選球眼/打球傾向/走塁/WAR 等 40+ 指標、2015-2024） |
-| `mlb_wp.fg_pitching_stats` | ~4,300 | **FanGraphs 投手シーズン成績**（Stuff+/SIERA/ERA-/ゾーン制球/WAR 等 45+ 指標、2015-2024） |
-| `mlb_wp.statcast_sprint_speed` | 4,975 | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2016-2024） |
-| `mlb_wp.statcast_oaa` | 2,428 | **Statcast OAA**（7 ポジション別 Outs Above Average、2016-2024） |
-| `mlb_wp.statcast_team_oaa` | 270 | **チーム OAA 集計**（チーム×シーズン別の合計/平均 OAA） |
-| `mlb_wp.statcast_catcher` | 702 | **Statcast 捕手能力**（pop time、arm strength、exchange time、2016-2024） |
+| `mlb_wp.play_states` | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗）— WP 固有 |
+| `mlb_shared.statcast_pitches` | 6,838,542 | **Statcast 全投球データ**（2015–2024、pybaseball 全 118 カラム + computed 4 = 122 列、4.77 GB） |
+| `mlb_shared.park_factors` | 329 | 球場パークファクター（savant-extras） |
+| `mlb_shared.fg_batting` | ~6,000/年 | **FanGraphs 打者シーズン成績**（全カラム、wRC+/選球眼/打球傾向/走塁/WAR 等） |
+| `mlb_shared.fg_pitching` | ~4,000/年 | **FanGraphs 投手シーズン成績**（全カラム、Stuff+/SIERA/ERA-/ゾーン制球/WAR 等） |
+| `mlb_shared.fg_pitcher_plus` | ~2,500/年 | **Stuff+/Location+/Pitching+** 球種別（2020+） |
+| `mlb_shared.sprint_speed` | ~500/年 | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2015+） |
+| `mlb_shared.oaa` | 2,428 | **Statcast OAA**（7 ポジション別 Outs Above Average、2016+） |
+| `mlb_shared.oaa_team` | 270 | **チーム OAA 集計**（チーム×シーズン別の合計/平均 OAA） |
+| `mlb_shared.catcher` | 702 | **Statcast 捕手能力**（pop time、arm strength、exchange time、2015+） |
+
+> 全共有テーブルは [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が毎週月曜に自動更新。`mlb_wp` にはWP固有の `play_states` のみ残存。
 
 Statcast データは pybaseball 全 118 カラム + computed 4 = **122 カラム**を保持（投球速度・変化量・打球速度・発射角度・xwOBA・バットトラッキング・選手年齢・ストライクゾーン・リリースポイント・投球軌道・MLB ベンチマーク WP 等）。WP モデル学習時は**打席結果のみ（`events IS NOT NULL`）**に絞り、約 172 万行で学習。
 
@@ -319,7 +322,7 @@ ensemble_pred = Σ(w_i × pred_i) / Σ(w_i)
 
 ```
 BigQuery
-├── mlb_wp.play_states (367K)     ── state-based engines ──────┐
+├── mlb_wp.play_states (367K)       ── state-based engines ────┐
 │     ↓ export_from_bq.py                                      │
 │   v1 Normal / v2 Empirical / LightGBM(state)                 │
 │     ↓                                                         │
@@ -445,11 +448,12 @@ gh workflow run "Validate WP Model" \
 - [ ] **Gemini API キー設定 + Streamlit Cloud 実動作確認**
 - [ ] プロンプト v3 改善（v2 の品質スコア分析結果ベース）
 
-### Phase 4: データ基盤統合 🔄（現在）
+### Phase 4: データ基盤統合 ✅
 - [x] **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 構築**（baseball-mlops との共有 BQ データ基盤、`mlb_shared` データセット）
 - [x] `statcast_pitches` 参照先を `mlb_shared` に切り替え
 - [x] `mlb_wp.statcast_pitches` → `mlb_shared.statcast_pitches` 移行
-- [ ] FG stats / fielding テーブルを `mlb_shared` に統合（テーブル名統一後）
+- [x] FG stats / fielding テーブルを `mlb_shared` に統合（テーブル名統一、WP独自fetchスクリプト削除）
+- [x] `mlb_wp` に残るのは `play_states` のみ
 
 ### Phase 5: 統合デプロイ
 - [ ] 本番エンジン切り替え（アンサンブル or 最良エンジン）

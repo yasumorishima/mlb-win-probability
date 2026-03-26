@@ -31,8 +31,7 @@ from google.cloud import bigquery
 
 
 PROJECT = "data-platform-490901"
-DATASET_SHARED = "mlb_shared"   # statcast_pitches (shared via mlb-data-pipeline)
-DATASET_WP = "mlb_wp"           # FG stats, fielding, etc. (WP-specific tables)
+DATASET_SHARED = "mlb_shared"   # All shared data via mlb-data-pipeline
 TABLE = "statcast_pitches"
 
 
@@ -75,6 +74,31 @@ def load_from_bq(test_year: int = 2024) -> tuple[pd.DataFrame, pd.DataFrame]:
     print(f"  Test:  {len(test):,} ({test_year})")
 
     return train, test
+
+
+def _sanitize_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """Apply mlb-data-pipeline sanitize_columns rules to ensure consistent names.
+
+    Handles both fresh BQ reads (already sanitized) and old cached CSVs
+    (original FanGraphs names with %, /, +, trailing -).
+    Double-sanitization is safe (no-op on already-clean names).
+    """
+    import re
+    rename = {}
+    for col in df.columns:
+        new = col
+        new = new.replace("%", "_pct")
+        new = new.replace("/", "_per_")
+        new = new.replace("+", "_plus")
+        new = re.sub(r"-$", "_minus", new)
+        new = re.sub(r"[^a-zA-Z0-9_]", "_", new)
+        new = re.sub(r"_+", "_", new)
+        new = new.strip("_")
+        if new != col:
+            rename[col] = new
+    if rename:
+        df = df.rename(columns=rename)
+    return df
 
 
 def _safe_col(df: pd.DataFrame, col: str, fill: float = 0,
@@ -220,55 +244,57 @@ def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     features["az"] = _safe_col(df, "az")
 
     # --- FanGraphs pitcher season stats (joined by pitcher + game_year) ---
+    # Column names follow mlb-data-pipeline sanitize_columns() rules:
+    #   % -> _pct, / -> _per_, + -> _plus, trailing - -> _minus
     # Core ERA models
     features["fg_pit_era"] = _safe_col(df, "fg_pit_ERA", fill=4.0)
     features["fg_pit_fip"] = _safe_col(df, "fg_pit_FIP", fill=4.0)
     features["fg_pit_xfip"] = _safe_col(df, "fg_pit_xFIP", fill=4.0)
     features["fg_pit_siera"] = _safe_col(df, "fg_pit_SIERA", fill=4.0)
-    features["fg_pit_era_minus"] = _safe_col(df, "fg_pit_ERA-", fill=100)
-    features["fg_pit_fip_minus"] = _safe_col(df, "fg_pit_FIP-", fill=100)
-    features["fg_pit_xfip_minus"] = _safe_col(df, "fg_pit_xFIP-", fill=100)
+    features["fg_pit_era_minus"] = _safe_col(df, "fg_pit_ERA_minus", fill=100)
+    features["fg_pit_fip_minus"] = _safe_col(df, "fg_pit_FIP_minus", fill=100)
+    features["fg_pit_xfip_minus"] = _safe_col(df, "fg_pit_xFIP_minus", fill=100)
     # Rate
-    features["fg_pit_k_pct"] = _safe_col(df, "fg_pit_K%", fill=0.22)
-    features["fg_pit_bb_pct"] = _safe_col(df, "fg_pit_BB%", fill=0.08)
-    features["fg_pit_k_bb_pct"] = _safe_col(df, "fg_pit_K-BB%", fill=0.14)
-    features["fg_pit_k9"] = _safe_col(df, "fg_pit_K/9", fill=8.5)
-    features["fg_pit_bb9"] = _safe_col(df, "fg_pit_BB/9", fill=3.2)
-    features["fg_pit_k_bb"] = _safe_col(df, "fg_pit_K/BB", fill=3.0)
-    features["fg_pit_hr9"] = _safe_col(df, "fg_pit_HR/9", fill=1.1)
-    features["fg_pit_hr_fb"] = _safe_col(df, "fg_pit_HR/FB", fill=0.11)
+    features["fg_pit_k_pct"] = _safe_col(df, "fg_pit_K_pct", fill=0.22)
+    features["fg_pit_bb_pct"] = _safe_col(df, "fg_pit_BB_pct", fill=0.08)
+    features["fg_pit_k_bb_pct"] = _safe_col(df, "fg_pit_K_BB_pct", fill=0.14)
+    features["fg_pit_k9"] = _safe_col(df, "fg_pit_K_per_9", fill=8.5)
+    features["fg_pit_bb9"] = _safe_col(df, "fg_pit_BB_per_9", fill=3.2)
+    features["fg_pit_k_bb"] = _safe_col(df, "fg_pit_K_per_BB", fill=3.0)
+    features["fg_pit_hr9"] = _safe_col(df, "fg_pit_HR_per_9", fill=1.1)
+    features["fg_pit_hr_fb"] = _safe_col(df, "fg_pit_HR_per_FB", fill=0.11)
     features["fg_pit_whip"] = _safe_col(df, "fg_pit_WHIP", fill=1.3)
     features["fg_pit_babip"] = _safe_col(df, "fg_pit_BABIP", fill=0.29)
-    features["fg_pit_lob_pct"] = _safe_col(df, "fg_pit_LOB%", fill=0.72)
+    features["fg_pit_lob_pct"] = _safe_col(df, "fg_pit_LOB_pct", fill=0.72)
     # Pitch quality
-    features["fg_pit_swstr"] = _safe_col(df, "fg_pit_SwStr%", fill=0.11)
-    features["fg_pit_csw"] = _safe_col(df, "fg_pit_CSW%", fill=0.28)
-    features["fg_pit_o_swing"] = _safe_col(df, "fg_pit_O-Swing%", fill=0.32)
-    features["fg_pit_z_swing"] = _safe_col(df, "fg_pit_Z-Swing%", fill=0.69)
-    features["fg_pit_o_contact"] = _safe_col(df, "fg_pit_O-Contact%", fill=0.62)
-    features["fg_pit_z_contact"] = _safe_col(df, "fg_pit_Z-Contact%", fill=0.86)
-    features["fg_pit_zone"] = _safe_col(df, "fg_pit_Zone%", fill=0.43)
-    features["fg_pit_fstrike"] = _safe_col(df, "fg_pit_F-Strike%", fill=0.60)
+    features["fg_pit_swstr"] = _safe_col(df, "fg_pit_SwStr_pct", fill=0.11)
+    features["fg_pit_csw"] = _safe_col(df, "fg_pit_CSW_pct", fill=0.28)
+    features["fg_pit_o_swing"] = _safe_col(df, "fg_pit_O_Swing_pct", fill=0.32)
+    features["fg_pit_z_swing"] = _safe_col(df, "fg_pit_Z_Swing_pct", fill=0.69)
+    features["fg_pit_o_contact"] = _safe_col(df, "fg_pit_O_Contact_pct", fill=0.62)
+    features["fg_pit_z_contact"] = _safe_col(df, "fg_pit_Z_Contact_pct", fill=0.86)
+    features["fg_pit_zone"] = _safe_col(df, "fg_pit_Zone_pct", fill=0.43)
+    features["fg_pit_fstrike"] = _safe_col(df, "fg_pit_F_Strike_pct", fill=0.60)
     # Stuff+ (2020+, fill=100 for league average)
-    features["fg_pit_stuff_plus"] = _safe_col(df, "fg_pit_Stuff+", fill=100)
-    features["fg_pit_location_plus"] = _safe_col(df, "fg_pit_Location+", fill=100)
-    features["fg_pit_pitching_plus"] = _safe_col(df, "fg_pit_Pitching+", fill=100)
+    features["fg_pit_stuff_plus"] = _safe_col(df, "fg_pit_Stuff_plus", fill=100)
+    features["fg_pit_location_plus"] = _safe_col(df, "fg_pit_Location_plus", fill=100)
+    features["fg_pit_pitching_plus"] = _safe_col(df, "fg_pit_Pitching_plus", fill=100)
     # Batted ball
-    features["fg_pit_gb_pct"] = _safe_col(df, "fg_pit_GB%", fill=0.42)
-    features["fg_pit_fb_pct"] = _safe_col(df, "fg_pit_FB%", fill=0.38)
-    features["fg_pit_ld_pct"] = _safe_col(df, "fg_pit_LD%", fill=0.19)
-    features["fg_pit_iffb_pct"] = _safe_col(df, "fg_pit_IFFB%", fill=0.10)
-    features["fg_pit_pull_pct"] = _safe_col(df, "fg_pit_Pull%", fill=0.40)
-    features["fg_pit_soft_pct"] = _safe_col(df, "fg_pit_Soft%", fill=0.16)
-    features["fg_pit_hard_pct"] = _safe_col(df, "fg_pit_Hard%", fill=0.31)
+    features["fg_pit_gb_pct"] = _safe_col(df, "fg_pit_GB_pct", fill=0.42)
+    features["fg_pit_fb_pct"] = _safe_col(df, "fg_pit_FB_pct", fill=0.38)
+    features["fg_pit_ld_pct"] = _safe_col(df, "fg_pit_LD_pct", fill=0.19)
+    features["fg_pit_iffb_pct"] = _safe_col(df, "fg_pit_IFFB_pct", fill=0.10)
+    features["fg_pit_pull_pct"] = _safe_col(df, "fg_pit_Pull_pct", fill=0.40)
+    features["fg_pit_soft_pct"] = _safe_col(df, "fg_pit_Soft_pct", fill=0.16)
+    features["fg_pit_hard_pct"] = _safe_col(df, "fg_pit_Hard_pct", fill=0.31)
     # Pitch type values
-    features["fg_pit_wfb_c"] = _safe_col(df, "fg_pit_wFB/C")
-    features["fg_pit_wsl_c"] = _safe_col(df, "fg_pit_wSL/C")
-    features["fg_pit_wch_c"] = _safe_col(df, "fg_pit_wCH/C")
+    features["fg_pit_wfb_c"] = _safe_col(df, "fg_pit_wFB_per_C")
+    features["fg_pit_wsl_c"] = _safe_col(df, "fg_pit_wSL_per_C")
+    features["fg_pit_wch_c"] = _safe_col(df, "fg_pit_wCH_per_C")
     # Role
     features["fg_pit_gs"] = _safe_col(df, "fg_pit_GS")
-    features["fg_pit_start_ip"] = _safe_col(df, "fg_pit_Start-IP")
-    features["fg_pit_relief_ip"] = _safe_col(df, "fg_pit_Relief-IP")
+    features["fg_pit_start_ip"] = _safe_col(df, "fg_pit_Start_IP")
+    features["fg_pit_relief_ip"] = _safe_col(df, "fg_pit_Relief_IP")
     # Value
     features["fg_pit_war"] = _safe_col(df, "fg_pit_WAR")
     features["fg_pit_clutch"] = _safe_col(df, "fg_pit_Clutch")
@@ -276,37 +302,38 @@ def engineer_features(df: pd.DataFrame) -> tuple[np.ndarray, list[str]]:
     features["fg_pit_gmli"] = _safe_col(df, "fg_pit_gmLI", fill=1.0)
 
     # --- FanGraphs batter season stats (joined by batter + game_year) ---
+    # Column names follow mlb-data-pipeline sanitize_columns() rules
     # Core
     features["fg_bat_woba"] = _safe_col(df, "fg_bat_wOBA", fill=0.30)
     features["fg_bat_xwoba"] = _safe_col(df, "fg_bat_xwOBA", fill=0.30)
-    features["fg_bat_wrc_plus"] = _safe_col(df, "fg_bat_wRC+", fill=100)
+    features["fg_bat_wrc_plus"] = _safe_col(df, "fg_bat_wRC_plus", fill=100)
     features["fg_bat_ops"] = _safe_col(df, "fg_bat_OPS", fill=0.70)
     features["fg_bat_iso"] = _safe_col(df, "fg_bat_ISO", fill=0.14)
     features["fg_bat_babip"] = _safe_col(df, "fg_bat_BABIP", fill=0.29)
     # Plate discipline
-    features["fg_bat_k_pct"] = _safe_col(df, "fg_bat_K%", fill=0.22)
-    features["fg_bat_bb_pct"] = _safe_col(df, "fg_bat_BB%", fill=0.08)
-    features["fg_bat_o_swing"] = _safe_col(df, "fg_bat_O-Swing%", fill=0.32)
-    features["fg_bat_z_swing"] = _safe_col(df, "fg_bat_Z-Swing%", fill=0.69)
-    features["fg_bat_o_contact"] = _safe_col(df, "fg_bat_O-Contact%", fill=0.61)
-    features["fg_bat_z_contact"] = _safe_col(df, "fg_bat_Z-Contact%", fill=0.86)
-    features["fg_bat_zone"] = _safe_col(df, "fg_bat_Zone%", fill=0.43)
-    features["fg_bat_swstr"] = _safe_col(df, "fg_bat_SwStr%", fill=0.11)
-    features["fg_bat_contact"] = _safe_col(df, "fg_bat_Contact%", fill=0.76)
+    features["fg_bat_k_pct"] = _safe_col(df, "fg_bat_K_pct", fill=0.22)
+    features["fg_bat_bb_pct"] = _safe_col(df, "fg_bat_BB_pct", fill=0.08)
+    features["fg_bat_o_swing"] = _safe_col(df, "fg_bat_O_Swing_pct", fill=0.32)
+    features["fg_bat_z_swing"] = _safe_col(df, "fg_bat_Z_Swing_pct", fill=0.69)
+    features["fg_bat_o_contact"] = _safe_col(df, "fg_bat_O_Contact_pct", fill=0.61)
+    features["fg_bat_z_contact"] = _safe_col(df, "fg_bat_Z_Contact_pct", fill=0.86)
+    features["fg_bat_zone"] = _safe_col(df, "fg_bat_Zone_pct", fill=0.43)
+    features["fg_bat_swstr"] = _safe_col(df, "fg_bat_SwStr_pct", fill=0.11)
+    features["fg_bat_contact"] = _safe_col(df, "fg_bat_Contact_pct", fill=0.76)
     # Batted ball
-    features["fg_bat_gb_pct"] = _safe_col(df, "fg_bat_GB%", fill=0.43)
-    features["fg_bat_fb_pct"] = _safe_col(df, "fg_bat_FB%", fill=0.38)
-    features["fg_bat_ld_pct"] = _safe_col(df, "fg_bat_LD%", fill=0.20)
-    features["fg_bat_iffb_pct"] = _safe_col(df, "fg_bat_IFFB%", fill=0.10)
-    features["fg_bat_hr_fb"] = _safe_col(df, "fg_bat_HR/FB", fill=0.11)
-    features["fg_bat_pull_pct"] = _safe_col(df, "fg_bat_Pull%", fill=0.40)
-    features["fg_bat_soft_pct"] = _safe_col(df, "fg_bat_Soft%", fill=0.16)
-    features["fg_bat_hard_pct"] = _safe_col(df, "fg_bat_Hard%", fill=0.38)
-    features["fg_bat_hardhit"] = _safe_col(df, "fg_bat_HardHit%", fill=0.38)
+    features["fg_bat_gb_pct"] = _safe_col(df, "fg_bat_GB_pct", fill=0.43)
+    features["fg_bat_fb_pct"] = _safe_col(df, "fg_bat_FB_pct", fill=0.38)
+    features["fg_bat_ld_pct"] = _safe_col(df, "fg_bat_LD_pct", fill=0.20)
+    features["fg_bat_iffb_pct"] = _safe_col(df, "fg_bat_IFFB_pct", fill=0.10)
+    features["fg_bat_hr_fb"] = _safe_col(df, "fg_bat_HR_per_FB", fill=0.11)
+    features["fg_bat_pull_pct"] = _safe_col(df, "fg_bat_Pull_pct", fill=0.40)
+    features["fg_bat_soft_pct"] = _safe_col(df, "fg_bat_Soft_pct", fill=0.16)
+    features["fg_bat_hard_pct"] = _safe_col(df, "fg_bat_Hard_pct", fill=0.38)
+    features["fg_bat_hardhit"] = _safe_col(df, "fg_bat_HardHit_pct", fill=0.38)
     # Pitch type values
-    features["fg_bat_wfb_c"] = _safe_col(df, "fg_bat_wFB/C")
-    features["fg_bat_wsl_c"] = _safe_col(df, "fg_bat_wSL/C")
-    features["fg_bat_wch_c"] = _safe_col(df, "fg_bat_wCH/C")
+    features["fg_bat_wfb_c"] = _safe_col(df, "fg_bat_wFB_per_C")
+    features["fg_bat_wsl_c"] = _safe_col(df, "fg_bat_wSL_per_C")
+    features["fg_bat_wch_c"] = _safe_col(df, "fg_bat_wCH_per_C")
     # Speed & baserunning
     features["fg_bat_spd"] = _safe_col(df, "fg_bat_Spd", fill=4.0)
     features["fg_bat_bsr"] = _safe_col(df, "fg_bat_BsR")
@@ -423,14 +450,14 @@ def main():
     # Load data
     train_df, test_df = load_from_bq(args.test_year)
 
-    # Merge park factors from BQ (savant-extras data already loaded there)
+    # Merge park factors from mlb_shared (savant-extras data via mlb-data-pipeline)
     print("\nLoading park factors...")
     try:
         bq_client = get_bq_client()
         pf_query = f"""
             SELECT CAST(season AS FLOAT64) AS game_year, team AS home_team,
                    pf_5yr, pf_hr
-            FROM `{PROJECT}.mlb_statcast.raw_park_factors`
+            FROM `{PROJECT}.{DATASET_SHARED}.park_factors`
         """
         pf = bq_client.query(pf_query).to_dataframe()
         if len(pf) > 0:
@@ -453,7 +480,7 @@ def main():
         if "game_year" in tdf.columns:
             tdf["game_year"] = tdf["game_year"].astype(float)
 
-    # --- Pitching stats ---
+    # --- Pitching stats (from mlb_shared.fg_pitching via mlb-data-pipeline) ---
     try:
         pit_path = data_dir / "fg_pitching.csv"
         if pit_path.exists():
@@ -461,19 +488,22 @@ def main():
         else:
             bq_client = get_bq_client()
             pit_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.fg_pitching_stats`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_SHARED}.fg_pitching`"
             ).to_dataframe()
             pit_df.to_csv(pit_path, index=False)
 
         if len(pit_df) > 0:
+            # Sanitize column names (handles both BQ-sanitized and old CSV originals)
+            pit_df = _sanitize_columns(pit_df)
             # Prefix FG columns to avoid collision with Statcast columns
-            skip = {"player_id", "Name", "season"}
+            # Pipeline uses lowercase 'name'/'season' and adds 'fg_id'
+            skip = {"player_id", "name", "season", "fg_id", "Name"}
             rename_map = {c: f"fg_pit_{c}" for c in pit_df.columns if c not in skip}
             pit_df = pit_df.rename(columns=rename_map)
             pit_df = pit_df.rename(columns={"player_id": "pitcher", "season": "game_year"})
             pit_df["pitcher"] = pit_df["pitcher"].astype(float)
             pit_df["game_year"] = pit_df["game_year"].astype(float)
-            pit_df = pit_df.drop(columns=["Name"], errors="ignore")
+            pit_df = pit_df.drop(columns=["name", "Name", "fg_id"], errors="ignore")
 
             train_df = train_df.merge(pit_df, on=["pitcher", "game_year"], how="left")
             test_df = test_df.merge(pit_df, on=["pitcher", "game_year"], how="left")
@@ -484,7 +514,7 @@ def main():
     except Exception as e:
         print(f"  FG pitching not available: {e}")
 
-    # --- Batting stats ---
+    # --- Batting stats (from mlb_shared.fg_batting via mlb-data-pipeline) ---
     try:
         bat_path = data_dir / "fg_batting.csv"
         if bat_path.exists():
@@ -492,18 +522,21 @@ def main():
         else:
             bq_client = get_bq_client()
             bat_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.fg_batting_stats`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_SHARED}.fg_batting`"
             ).to_dataframe()
             bat_df.to_csv(bat_path, index=False)
 
         if len(bat_df) > 0:
-            skip = {"player_id", "Name", "season"}
+            # Sanitize column names (handles both BQ-sanitized and old CSV originals)
+            bat_df = _sanitize_columns(bat_df)
+            # Pipeline uses lowercase 'name'/'season' and adds 'fg_id'
+            skip = {"player_id", "name", "season", "fg_id", "Name"}
             rename_map = {c: f"fg_bat_{c}" for c in bat_df.columns if c not in skip}
             bat_df = bat_df.rename(columns=rename_map)
             bat_df = bat_df.rename(columns={"player_id": "batter", "season": "game_year"})
             bat_df["batter"] = bat_df["batter"].astype(float)
             bat_df["game_year"] = bat_df["game_year"].astype(float)
-            bat_df = bat_df.drop(columns=["Name"], errors="ignore")
+            bat_df = bat_df.drop(columns=["name", "Name", "fg_id"], errors="ignore")
 
             train_df = train_df.merge(bat_df, on=["batter", "game_year"], how="left")
             test_df = test_df.merge(bat_df, on=["batter", "game_year"], how="left")
@@ -514,16 +547,16 @@ def main():
     except Exception as e:
         print(f"  FG batting not available: {e}")
 
-    # --- Sprint speed (join on batter + game_year) ---
+    # --- Sprint speed (from mlb_shared.sprint_speed, join on batter + game_year) ---
     print("\nLoading Statcast sprint speed...")
     try:
-        sprint_path = data_dir / "statcast_sprint_speed.csv"
+        sprint_path = data_dir / "sprint_speed.csv"
         if sprint_path.exists():
             sprint_df = pd.read_csv(sprint_path)
         else:
             bq_client = get_bq_client()
             sprint_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.statcast_sprint_speed`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_SHARED}.sprint_speed`"
             ).to_dataframe()
             sprint_df.to_csv(sprint_path, index=False)
 
@@ -550,16 +583,16 @@ def main():
     except Exception as e:
         print(f"  Sprint speed not available: {e}")
 
-    # --- Catcher stats (join on fielder_2 + game_year) ---
+    # --- Catcher stats (from mlb_shared.catcher, join on fielder_2 + game_year) ---
     print("\nLoading Statcast catcher stats...")
     try:
-        catcher_path = data_dir / "statcast_catcher.csv"
+        catcher_path = data_dir / "catcher.csv"
         if catcher_path.exists():
             catcher_df = pd.read_csv(catcher_path)
         else:
             bq_client = get_bq_client()
             catcher_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.statcast_catcher`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_SHARED}.catcher`"
             ).to_dataframe()
             catcher_df.to_csv(catcher_path, index=False)
 
@@ -586,16 +619,16 @@ def main():
     except Exception as e:
         print(f"  Catcher stats not available: {e}")
 
-    # --- Team OAA (join on fielding team + game_year) ---
+    # --- Team OAA (from mlb_shared.oaa_team, join on fielding team + game_year) ---
     print("\nLoading Statcast team OAA...")
     try:
-        team_oaa_path = data_dir / "statcast_team_oaa.csv"
+        team_oaa_path = data_dir / "oaa_team.csv"
         if team_oaa_path.exists():
             team_oaa_df = pd.read_csv(team_oaa_path)
         else:
             bq_client = get_bq_client()
             team_oaa_df = bq_client.query(
-                f"SELECT * FROM `{PROJECT}.{DATASET_WP}.statcast_team_oaa`"
+                f"SELECT * FROM `{PROJECT}.{DATASET_SHARED}.oaa_team`"
             ).to_dataframe()
             team_oaa_df.to_csv(team_oaa_path, index=False)
 
