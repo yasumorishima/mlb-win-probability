@@ -336,6 +336,7 @@ BigQuery
 │   Leave-one-year-out CV (2015–2024)                          │
 │                                                               │
 ├── mlb_shared.statcast_pitches (6.8M) ── Statcast engine ───┘
+│     ↓ preflight.py (7テーブル・カラム・join検証 → 失敗時即停止+デバッグ出力)
 │     ↓ train_wp_statcast.py
 │   LightGBM(Statcast+FG, 157 features, Optuna)
 │     ↓
@@ -435,7 +436,7 @@ gh workflow run "Validate WP Model" \
 - [x] **FanGraphs 全指標統合（165 特徴量）** — 投手 46 指標（Stuff+/SIERA/ERA-/ゾーン制球等）+ 打者 35 指標（wRC+/選球眼/打球傾向/走塁/WAR 等）を BQ マスタ経由で投球単位データに join
 - [x] **走塁・守備マスタ統合（165 特徴量）** — Statcast sprint speed（打者走力）+ OAA チーム集計（守備力）+ catcher pop time/arm strength（捕手能力）追加
 - [x] **走塁・守備 BQ ロード + カバレッジ検証完了** — sprint 87.2% / team OAA 83.3% / catcher 86.0%（2015 はデータなし、2016-2024 は 93-99%）
-- [ ] **165 特徴量 Statcast+FG+Fielding モデル学習中** ← 現在ここ
+- [ ] **165 特徴量 Statcast+FG+Fielding モデル学習中**（mlb_shared 移行後初回、hosted runner で実行中 2026-03-26）
 - [ ] Conformal Prediction 再計算
 - [ ] Bayesian（Statcast base + 階層）学習
 - [ ] Ensemble（v1+v2+Statcast+Bayesian）学習
@@ -448,12 +449,13 @@ gh workflow run "Validate WP Model" \
 - [ ] **Gemini API キー設定 + Streamlit Cloud 実動作確認**
 - [ ] プロンプト v3 改善（v2 の品質スコア分析結果ベース）
 
-### Phase 4: データ基盤統合 ✅
+### Phase 4: データ基盤統合 + Preflight ✅
 - [x] **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 構築**（baseball-mlops との共有 BQ データ基盤、`mlb_shared` データセット）
 - [x] `statcast_pitches` 参照先を `mlb_shared` に切り替え
 - [x] `mlb_wp.statcast_pitches` → `mlb_shared.statcast_pitches` 移行
 - [x] FG stats / fielding テーブルを `mlb_shared` に統合（テーブル名統一、WP独自fetchスクリプト削除）
 - [x] `mlb_wp` に残るのは `play_states` のみ
+- [x] **Preflight check 導入** — 学習前に全 7 BQ テーブル存在・行数・sanitized カラム名・join key 整合性を自動検証。問題時は fuzzy match 候補・SQL 本文・unmatched サンプルキーを出力して即停止
 
 ### Phase 5: 統合デプロイ
 - [ ] 本番エンジン切り替え（アンサンブル or 最良エンジン）
