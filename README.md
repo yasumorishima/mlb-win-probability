@@ -283,19 +283,19 @@ export WANDB_API_KEY="your-wandb-key"
 | Table | Rows | Description |
 |-------|------|-------------|
 | `mlb_wp.play_states` | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗）— WP 固有 |
-| `mlb_shared.statcast_pitches` | 6,838,542 | **Statcast 全投球データ**（2015–2024、pybaseball 全 118 カラム + computed 4 = 122 列、4.77 GB） |
-| `mlb_shared.park_factors` | 329 | 球場パークファクター（savant-extras） |
-| `mlb_shared.fg_batting` | ~6,000/年 | **FanGraphs 打者シーズン成績**（全カラム、wRC+/選球眼/打球傾向/走塁/WAR 等） |
-| `mlb_shared.fg_pitching` | ~4,000/年 | **FanGraphs 投手シーズン成績**（全カラム、Stuff+/SIERA/ERA-/ゾーン制球/WAR 等） |
-| `mlb_shared.fg_pitcher_plus` | ~2,500/年 | **Stuff+/Location+/Pitching+** 球種別（2020+） |
-| `mlb_shared.sprint_speed` | ~500/年 | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2015+） |
-| `mlb_shared.oaa` | 2,428 | **Statcast OAA**（7 ポジション別 Outs Above Average、2016+） |
-| `mlb_shared.oaa_team` | 270 | **チーム OAA 集計**（チーム×シーズン別の合計/平均 OAA） |
-| `mlb_shared.catcher` | 702 | **Statcast 捕手能力**（pop time、arm strength、exchange time、2015+） |
+| `mlb_shared.statcast_pitches` | 6,979,356 | **Statcast 全投球データ**（2015–2024、122 カラム、4.85 GB） |
+| `mlb_shared.park_factors` | 329 | 球場パークファクター（savant-extras、2015-2025） |
+| `mlb_shared.fg_batting` | 5,703 | **FanGraphs 打者シーズン成績**（321 カラム全量、2015-2025、qual=50） |
+| `mlb_shared.fg_pitching` | 4,648 | **FanGraphs 投手シーズン成績**（394 カラム全量、2015-2025、qual=30） |
+| `mlb_shared.fg_pitcher_plus` | 2,383 | **Stuff+/Location+/Pitching+** 球種別（2020+、31 カラム） |
+| `mlb_shared.sprint_speed` | 6,104 | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2015+） |
+| `mlb_shared.oaa` | 2,696 | **Statcast OAA**（7 ポジション別 Outs Above Average、2016+） |
+| `mlb_shared.oaa_team` | 300 | **チーム OAA 集計**（チーム×シーズン別の合計/平均 OAA） |
+| `mlb_shared.catcher` | 859 | **Statcast 捕手能力**（pop time、arm strength、exchange time、2015+） |
 
-> 全共有テーブルは [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が毎週月曜に自動更新。`mlb_wp` にはWP固有の `play_states` のみ残存。
+> 全共有データ（16 テーブル / 4.88 GB）は [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が毎週月曜に自動更新。`mlb_wp` には WP 固有の `play_states` のみ残存。
 
-Statcast データは pybaseball 全 118 カラム + computed 4 = **122 カラム**を保持（投球速度・変化量・打球速度・発射角度・xwOBA・バットトラッキング・選手年齢・ストライクゾーン・リリースポイント・投球軌道・MLB ベンチマーク WP 等）。WP モデル学習時は**打席結果のみ（`events IS NOT NULL`）**に絞り、約 172 万行で学習。
+Statcast データは pybaseball 全 118 カラム + computed 4 = **122 カラム**を保持（投球速度・変化量・打球速度・発射角度・xwOBA・バットトラッキング・選手年齢・ストライクゾーン・リリースポイント・投球軌道・MLB ベンチマーク WP 等）。WP モデル学習時は**レギュラーシーズン打席結果のみ（`game_type = 'R' AND events IS NOT NULL`）**に絞り、約 181 万打席で学習。
 
 ### エンジン構成
 
