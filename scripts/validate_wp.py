@@ -12,10 +12,19 @@ Metrics:
 import csv
 import json
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 240):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from win_probability import calculate_wp, MLB_RPG
@@ -253,6 +262,8 @@ def main():
                         default="mlb-win-probability")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     output_dir = (Path(args.output_dir)
                   if args.output_dir
                   else Path(args.input).parent.parent / "results")
@@ -265,6 +276,7 @@ def main():
 
     print("Computing metrics...")
     metrics = compute_metrics(states)
+    _log_elapsed("compute_metrics", t0)
 
     # --- Print summary ---
     print(f"\n{'=' * 60}")
@@ -298,6 +310,7 @@ def main():
     with open(metrics_path, "w") as f:
         json.dump(metrics, f, indent=2)
     print(f"\nMetrics saved to {metrics_path}")
+    _log_elapsed("save_and_plot", t0)
 
     plot_calibration(
         metrics["calibration"],

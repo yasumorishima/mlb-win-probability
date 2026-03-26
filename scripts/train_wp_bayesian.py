@@ -41,6 +41,14 @@ from scipy.special import ndtr as _ndtr
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+
+def _log_elapsed(label: str, start: float, budget_min: int = 120):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
+
 # Lazy imports for JAX/NumPyro (fail fast with clear message)
 try:
     import jax
@@ -753,6 +761,8 @@ def main():
                         help="Path to Statcast LightGBM model (wp_statcast_lgbm.txt)")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -775,6 +785,7 @@ def main():
     if not train_states or not test_states:
         print("ERROR: Insufficient data")
         sys.exit(1)
+    _log_elapsed("load_data", t0)
 
     # -------------------------------------------------------
     # Prepare arrays
@@ -835,6 +846,7 @@ def main():
           f"unique={np.unique(test_sidx).tolist()}")
     print(f"  (Test year {args.test_year} -> idx {test_sidx[0]} "
           f"= extrapolate from {train_arrays['years'][-1]})")
+    _log_elapsed("prepare_features", t0)
 
     # -------------------------------------------------------
     # Baseline (on test set)
@@ -856,6 +868,7 @@ def main():
 
     posterior, losses = train_svi(
         train_arrays, n_steps=args.n_steps, lr=args.lr, seed=args.seed)
+    _log_elapsed("train_svi", t0)
 
     # -------------------------------------------------------
     # Posterior summary
@@ -1006,6 +1019,7 @@ def main():
         json.dump(results, f, indent=2)
     print(f"  {results_path}")
 
+    _log_elapsed("total", t0)
     print("\nDone!")
 
 

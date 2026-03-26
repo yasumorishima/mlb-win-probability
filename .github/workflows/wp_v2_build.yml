@@ -52,6 +52,7 @@ jobs:
         continue-on-error: true
         env:
           GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
+          PYTHONUNBUFFERED: "1"
         run: |
           pip install google-cloud-bigquery --quiet
           mkdir -p data
@@ -98,6 +99,8 @@ jobs:
 
       - name: Build empirical WP table + Markov chain (all years)
         if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/build_wp_v2.py \
             --data-dir data/ \
@@ -106,6 +109,8 @@ jobs:
 
       - name: Train LightGBM ML model
         if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/train_wp_lgbm.py \
             --data-dir data/ \
@@ -113,6 +118,8 @@ jobs:
 
       - name: Compare all WP engines (fair holdout)
         if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           mkdir -p results
           python scripts/compare_wp_engines.py \
@@ -121,6 +128,8 @@ jobs:
 
       - name: Ensemble + Calibration (single holdout)
         if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/ensemble_wp.py \
             --data-dir data/ \
@@ -128,6 +137,8 @@ jobs:
 
       - name: Leave-one-year-out cross-validation
         if: inputs.step == 'build_and_compare' || inputs.step == 'wp_v2_full'
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/ensemble_wp.py \
             --data-dir data/ \

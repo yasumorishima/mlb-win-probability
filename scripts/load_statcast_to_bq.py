@@ -15,9 +15,18 @@ from __future__ import annotations
 
 import argparse
 import os
+import time
 from pathlib import Path
 
 import pandas as pd
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 360):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 PROJECT = "data-platform-490901"
 DATASET = "mlb_shared"
@@ -299,7 +308,9 @@ def main():
                         help="Append to existing BQ table (don't truncate)")
     args = parser.parse_args()
 
+    t0 = time.time()
     load_to_bq(Path(args.data_dir), append=args.append)
+    _log_elapsed("total", t0)
 
 
 if __name__ == "__main__":

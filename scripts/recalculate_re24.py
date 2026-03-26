@@ -13,10 +13,19 @@ Compares computed values against hardcoded RE24_MLB (2010-2019 averages).
 import csv
 import json
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 240):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 from win_probability import RE24_MLB
@@ -128,6 +137,8 @@ def main():
                         help="Output JSON path")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     output_dir = Path(args.input).parent.parent / "results"
     output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output or str(output_dir / "re24_computed.json")
@@ -138,6 +149,7 @@ def main():
 
     print("Computing RE24 from actual data...\n")
     re24 = compute_re24(states)
+    _log_elapsed("compute_re24", t0)
 
     # Print comparison table
     print(f"{'State':<12} {'Computed':>9} {'Hardcoded':>10} "
@@ -185,6 +197,7 @@ def main():
                     f"# {label} (n={vals['count']})\n")
         f.write("}\n")
     print(f"Python dict saved to {py_output}")
+    _log_elapsed("total", t0)
 
 
 if __name__ == "__main__":

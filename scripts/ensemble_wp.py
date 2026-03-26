@@ -21,9 +21,18 @@ from __future__ import annotations
 import csv
 import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 120):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -432,6 +441,8 @@ def main():
                         help="Run leave-one-year-out cross-validation")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -567,6 +578,7 @@ def main():
                 "improvement_calibrated_pct": round(imp_cal, 2),
             }, f, indent=2)
         print(f"\nSaved: {cv_path}")
+        _log_elapsed("cross_validation_total", t0)
 
     else:
         # -------------------------------------------------------
@@ -579,6 +591,7 @@ def main():
         test_states = load_play_states(test_path)
         actuals = np.array([s["home_won"] for s in test_states], dtype=float)
         print(f"Test data: {len(test_states):,} plays")
+        _log_elapsed("load_data", t0)
 
         # Train data for calibration
         train_states = []
@@ -643,6 +656,7 @@ def main():
             print("  (game-state only — live mode with pitch/hit data will be better)")
         else:
             print("  SKIP: Statcast not available")
+        _log_elapsed("engine_predictions", t0)
 
         # Ensemble
         print(f"\n{'=' * 60}")
@@ -717,6 +731,8 @@ def main():
         print(f"\nSaved: {weights_path}")
 
         # Save calibrator
+        _log_elapsed("ensemble_and_calibration", t0)
+
         try:
             from sklearn.isotonic import IsotonicRegression
             import joblib

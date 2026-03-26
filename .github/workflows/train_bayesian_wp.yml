@@ -46,6 +46,7 @@ jobs:
       - name: Export play_states + statcast from BigQuery
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/export_from_bq.py --output-dir data/ --statcast
 
@@ -71,6 +72,8 @@ jobs:
           fi
 
       - name: Train Bayesian WP model
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/train_wp_bayesian.py \
             --data-dir data/ \

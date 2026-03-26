@@ -18,9 +18,18 @@ from __future__ import annotations
 import csv
 import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 360):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 # RE24 table for feature engineering
 RE24_MLB = {
@@ -259,6 +268,8 @@ def main():
                         help="CatBoost Optuna trials (0=skip CatBoost)")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     try:
         import lightgbm as lgb
     except ImportError:
@@ -287,6 +298,7 @@ def main():
     X_test, y_test = X[test_mask], y[test_mask]
     print(f"  Train: {len(X_train):,} ({years[train_mask].min()}-{years[train_mask].max()})")
     print(f"  Test:  {len(X_test):,} ({test_year})")
+    _log_elapsed("load_data", t0)
 
     # -------------------------------------------------------
     # LightGBM
@@ -369,6 +381,7 @@ def main():
         json.dump(lgbm_metrics, f, indent=2)
     print(f"\n  Model: {model_path}")
     print(f"  Metrics: {metrics_path}")
+    _log_elapsed("lightgbm_train", t0)
 
     # -------------------------------------------------------
     # CatBoost
@@ -420,6 +433,7 @@ def main():
     if args.n_trials_catboost > 0 and cb_model is not None:
         print(f"  CatBoost Brier: {cb_metrics['brier_score']:.6f} "
               f"({args.n_trials_catboost} Optuna trials)")
+    _log_elapsed("total", t0)
 
 
 if __name__ == "__main__":

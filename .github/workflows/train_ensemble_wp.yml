@@ -43,6 +43,7 @@ jobs:
       - name: Export play states + statcast from BQ
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/export_from_bq.py --output-dir data/ --statcast
 
@@ -68,6 +69,7 @@ jobs:
       - name: Train ensemble
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+          PYTHONUNBUFFERED: "1"
         run: |
           ARGS="--data-dir data/ --output-dir results/"
           if [ "${{ inputs.cross_validate }}" = "true" ]; then

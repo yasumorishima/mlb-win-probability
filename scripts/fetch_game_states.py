@@ -15,6 +15,14 @@ import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 
+
+def _log_elapsed(label: str, start: float, budget_min: int = 240):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
+
 BASE_URL = "https://statsapi.mlb.com/api"
 DATA_DIR = Path(__file__).parent.parent / "data"
 
@@ -152,6 +160,8 @@ def main():
                         help="Seconds between game feed fetches")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     DATA_DIR.mkdir(exist_ok=True)
     year = args.start_date[:4]
     output = args.output or str(DATA_DIR / f"play_states_{year}.csv")
@@ -173,6 +183,7 @@ def main():
         time.sleep(0.3)
 
     print(f"Total games to process: {len(all_games)}")
+    _log_elapsed("fetch_schedule", t0)
 
     # --- Resume support: skip already-fetched games ---
     existing_pks = set()
@@ -217,6 +228,7 @@ def main():
             time.sleep(args.delay)
 
     total_games = len(existing_pks) + len(remaining) - failed
+    _log_elapsed("fetch_play_by_play", t0)
     print(f"\nDone: {total_games} games, ~{total_plays} new plays -> {output}")
     if failed:
         print(f"  ({failed} games failed to fetch)")

@@ -14,10 +14,19 @@ Minimizes Brier Score on actual play-by-play data.
 import csv
 import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
 import optuna
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 240):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 from scipy.stats import norm, poisson
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
@@ -163,6 +172,8 @@ def main():
                         default="mlb-win-probability")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     output_dir = Path(args.input).parent.parent / "results"
     output_dir.mkdir(parents=True, exist_ok=True)
     output = args.output or str(output_dir / "optimized_params.json")
@@ -205,6 +216,7 @@ def main():
     # Seed with current defaults
     study.enqueue_trial(default_params)
 
+    _log_elapsed("load_and_baseline", t0)
     print(f"\nRunning {args.n_trials} Optuna trials...")
     study.optimize(
         lambda trial: objective(trial, states),
@@ -240,6 +252,7 @@ def main():
     with open(output, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nResults saved to {output}")
+    _log_elapsed("total", t0)
 
     if args.wandb:
         import wandb

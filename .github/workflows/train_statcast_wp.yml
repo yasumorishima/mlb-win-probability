@@ -42,11 +42,13 @@ jobs:
       - name: Preflight check (BQ tables, columns, joins)
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+          PYTHONUNBUFFERED: "1"
         run: python scripts/preflight.py
 
       - name: Train Statcast WP model
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/train_wp_statcast.py \
             --output-dir results/ \
@@ -56,6 +58,7 @@ jobs:
       - name: Compute conformal prediction intervals
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+          PYTHONUNBUFFERED: "1"
         run: |
           if [ -f results/wp_statcast_lgbm.txt ]; then
             # Export calibration data from BQ

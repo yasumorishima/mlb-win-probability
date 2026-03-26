@@ -23,6 +23,14 @@ import pandas as pd
 from pybaseball import statcast
 
 
+def _log_elapsed(label: str, start: float, budget_min: int = 360):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
+
+
 def fetch_year(year: int, output_dir: Path, month: int | None = None) -> Path:
     """Fetch one year (or month) of Statcast data."""
     if month:
@@ -110,6 +118,8 @@ def main():
     else:
         years = list(range(args.start_year, args.end_year + 1))
 
+    t0 = time.time()
+
     print(f"Fetching Statcast data: {years}")
     print(f"Output: {output_dir}")
     print()
@@ -131,6 +141,7 @@ def main():
     print(f"\n{'=' * 50}")
     print(f"TOTAL: {total_rows:,} pitches across {len(years)} years")
     print(f"{'=' * 50}")
+    _log_elapsed("total", t0)
 
 
 if __name__ == "__main__":

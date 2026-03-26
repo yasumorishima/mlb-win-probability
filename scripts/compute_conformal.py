@@ -14,9 +14,18 @@ from __future__ import annotations
 import json
 import math
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 360):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -74,6 +83,8 @@ def main():
                         help="Calibration year (must be holdout from training)")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -114,6 +125,7 @@ def main():
 
     print(f"Predictions: mean={predictions.mean():.4f}, "
           f"std={predictions.std():.4f}")
+    _log_elapsed("predict", t0)
 
     # Compute conformal quantiles
     print(f"\nConformal quantiles:")
@@ -131,6 +143,7 @@ def main():
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nSaved: {out_path}")
+    _log_elapsed("total", t0)
 
 
 if __name__ == "__main__":

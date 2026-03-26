@@ -53,6 +53,8 @@ jobs:
           echo "Date range: $START to $END"
 
       - name: Fetch play-by-play data
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/fetch_game_states.py \
             --start-date ${{ steps.dates.outputs.start }} \
@@ -62,6 +64,7 @@ jobs:
       - name: Validate WP model (current params)
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/validate_wp.py \
             --input data/play_states_${{ github.event.inputs.season }}.csv \
@@ -69,6 +72,8 @@ jobs:
             --wandb
 
       - name: Recalculate RE24 from data
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/recalculate_re24.py \
             --input data/play_states_${{ github.event.inputs.season }}.csv \
@@ -78,6 +83,7 @@ jobs:
         if: ${{ github.event.inputs.optimize == 'true' }}
         env:
           WANDB_API_KEY: ${{ secrets.WANDB_API_KEY }}
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/optimize_params.py \
             --input data/play_states_${{ github.event.inputs.season }}.csv \

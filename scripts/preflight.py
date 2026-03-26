@@ -18,9 +18,18 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 import traceback
 from difflib import get_close_matches
 from pathlib import Path
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 360):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 PROJECT = "data-platform-490901"
 DATASET = "mlb_shared"
@@ -463,6 +472,8 @@ def main():
     parser.add_argument("--verbose", action="store_true")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     print("=" * 60)
     print("mlb-win-probability Preflight Check")
     print("=" * 60)
@@ -477,9 +488,13 @@ def main():
         sys.exit(1)
 
     check_table_existence(client, existing_tables)
+    _log_elapsed("table_existence", t0)
     check_columns(client, existing_tables)
+    _log_elapsed("column_validation", t0)
     check_statcast_year_coverage(client, existing_tables)
+    _log_elapsed("year_coverage", t0)
     check_join_keys(client, existing_tables)
+    _log_elapsed("join_keys", t0)
 
     # Summary
     print("\n" + "=" * 60)

@@ -16,7 +16,16 @@ import csv
 import json
 import os
 import sys
+import time
 from pathlib import Path
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 120):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 
 PROJECT = "data-platform-490901"
@@ -160,6 +169,8 @@ def main():
                         help="Also export statcast_pitches (at-bat outcomes)")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -167,11 +178,13 @@ def main():
     if not success:
         print("BQ export failed — use fetch_game_states.py as fallback")
         sys.exit(1)
+    _log_elapsed("export_play_states", t0)
 
     if args.statcast:
         statcast_ok = export_statcast_from_bq(output_dir)
         if not statcast_ok:
             print("WARNING: Statcast export failed (ensemble will use game-state fallback)")
+        _log_elapsed("export_statcast", t0)
 
 
 if __name__ == "__main__":

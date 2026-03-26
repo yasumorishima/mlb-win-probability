@@ -23,11 +23,20 @@ import argparse
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from google.cloud import bigquery
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 360):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 
 PROJECT = "data-platform-490901"
@@ -444,11 +453,15 @@ def main():
                         help="CatBoost Optuna trials")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load data
     train_df, test_df = load_from_bq(args.test_year)
+
+    _log_elapsed("load_from_bq", t0)
 
     # Merge park factors from mlb_shared (savant-extras data via mlb-data-pipeline)
     print("\nLoading park factors...")
@@ -672,6 +685,8 @@ def main():
     except Exception as e:
         print(f"  Team OAA not available: {e}")
 
+    _log_elapsed("merge_external_data", t0)
+
     # Engineer features
     print("\nEngineering features...")
     X_train, feature_names = engineer_features(train_df)
@@ -745,6 +760,7 @@ def main():
     print(f"  Features: {len(feature_names)}")
     print(f"  Train: {X_train.shape}")
     print(f"  Test: {X_test.shape}")
+    _log_elapsed("engineer_features", t0)
 
     # MLB home_win_exp as benchmark
     print(f"\n{'=' * 60}")
@@ -841,6 +857,7 @@ def main():
 
     # Save
     lgbm_model.save_model(str(output_dir / "wp_statcast_lgbm.txt"))
+    _log_elapsed("lightgbm_train", t0)
 
     # -------------------------------------------------------
     # CatBoost
@@ -932,6 +949,7 @@ def main():
     with open(results_path, "w") as f:
         json.dump(results, f, indent=2)
     print(f"\nSaved: {results_path}")
+    _log_elapsed("total", t0)
 
 
 if __name__ == "__main__":

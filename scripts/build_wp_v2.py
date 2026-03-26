@@ -20,10 +20,19 @@ from __future__ import annotations
 import csv
 import json
 import sys
+import time
 from collections import defaultdict
 from pathlib import Path
 
 import numpy as np
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 360):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 MAX_RUNS = 15       # cap run distributions at 15+
 PRIOR_STRENGTH = 20 # Bayesian smoothing: equivalent to 20 pseudo-observations
@@ -380,6 +389,8 @@ def main():
                         help=f"Simulations per starting state (default: {N_SIMS})")
     args = parser.parse_args()
 
+    t0 = time.time()
+
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -403,6 +414,7 @@ def main():
           f"({years[0]}-{years[-1]})")
     if exclude:
         print(f"  Excluded years: {sorted(exclude)}")
+    _log_elapsed("load_data", t0)
 
     # 2. Extract transitions
     print(f"\n{'=' * 60}")
@@ -410,6 +422,7 @@ def main():
     print(f"{'=' * 60}")
     transitions = extract_transitions(states)
     print(f"  {len(transitions):,} transitions extracted")
+    _log_elapsed("extract_transitions", t0)
 
     # 3. Build transition matrix
     print(f"\n{'=' * 60}")
@@ -426,6 +439,7 @@ def main():
         for t in top5:
             print(f"    -> {t['to']} (p={t['prob']:.3f}, runs={t['runs']}, "
                   f"n={t['count']:,})")
+    _log_elapsed("build_transition_matrix", t0)
 
     # 4. Simulate run distributions
     print(f"\n{'=' * 60}")
@@ -442,6 +456,7 @@ def main():
           f"(MLB avg per half-inning ~0.50)")
     print(f"  P(0 runs from 0_000): {fresh[0]:.3f}")
     print(f"  P(1+ runs from 0_000): {1 - fresh[0]:.3f}")
+    _log_elapsed("simulate_run_distributions", t0)
 
     # 5. Build empirical WP table
     print(f"\n{'=' * 60}")
@@ -467,6 +482,7 @@ def main():
             print(f"  {desc}: wp={entry['wp']:.3f} "
                   f"(emp={entry['empirical_wp']:.3f}, "
                   f"markov={entry['markov_wp']:.3f}, n={entry['n']})")
+    _log_elapsed("build_empirical_wp", t0)
 
     # 6. Save outputs
     print(f"\n{'=' * 60}")
@@ -489,6 +505,7 @@ def main():
         json.dump(wp_table, f)
     print(f"  {wp_path} ({wp_path.stat().st_size / 1024:.0f} KB)")
 
+    _log_elapsed("save_outputs", t0)
     print("\nDone!")
 
 

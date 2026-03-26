@@ -45,6 +45,8 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp-sa-key.json" >> $GITHUB_ENV
 
       - name: Fetch Statcast data (pybaseball)
+        env:
+          PYTHONUNBUFFERED: "1"
         run: |
           python scripts/fetch_statcast_full.py \
             --start-year ${{ inputs.start_year }} \
@@ -54,6 +56,7 @@ jobs:
       - name: Load to BigQuery
         env:
           GOOGLE_APPLICATION_CREDENTIALS: /tmp/gcp-sa-key.json
+          PYTHONUNBUFFERED: "1"
         run: |
           APPEND_FLAG=""
           if [ "${{ inputs.append }}" = "true" ]; then

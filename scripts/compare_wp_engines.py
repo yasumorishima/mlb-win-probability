@@ -13,9 +13,18 @@ from __future__ import annotations
 import csv
 import json
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
+
+
+def _log_elapsed(label: str, start: float, budget_min: int = 360):
+    elapsed_min = (time.time() - start) / 60
+    print(f"  [{label}] elapsed: {elapsed_min:.1f} min / {budget_min} min budget")
+    if elapsed_min > budget_min * 0.8:
+        print(f"  WARNING: {label} used {elapsed_min:.0f}/{budget_min} min "
+              f"({elapsed_min / budget_min * 100:.0f}%) -- timeout risk!")
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -111,6 +120,8 @@ def main():
     parser.add_argument("--test-year", type=int, default=None)
     args = parser.parse_args()
 
+    t0 = time.time()
+
     data_dir = Path(args.data_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -140,6 +151,7 @@ def main():
     print(f"  Brier: {results['v1_normal']['brier']:.6f} | "
           f"BSS: {results['v1_normal']['brier_skill']:.4f} | "
           f"ECE: {results['v1_normal']['ece']:.4f}")
+    _log_elapsed("v1_normal", t0)
 
     # -------------------------------------------------------
     # Engine B: v2 (Empirical + Markov)
@@ -192,6 +204,7 @@ def main():
         print(f"  ERROR: {e}")
         import traceback
         traceback.print_exc()
+    _log_elapsed("v2_empirical_markov", t0)
 
     # -------------------------------------------------------
     # Engine C: LightGBM (already trained with holdout)
@@ -287,6 +300,7 @@ def main():
     with open(comparison_path, "w") as f:
         json.dump(comparison, f, indent=2)
     print(f"\nSaved: {comparison_path}")
+    _log_elapsed("total", t0)
 
     # Plot
     try:
