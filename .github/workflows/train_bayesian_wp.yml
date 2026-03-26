@@ -170,4 +170,4 @@ jobs:
           fi
 
           PAYLOAD=$(python -c "import json,sys; print(json.dumps({'content': sys.argv[1]}))" "$BODY")
-          curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"
+          curl -sS -w "\nHTTP %{http_code}\n" -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL"

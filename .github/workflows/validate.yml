@@ -206,6 +206,6 @@ jobs:
           HEREDOC
           )
 
-          curl -s -H "Content-Type: application/json" \
+          curl -sS -w "\nHTTP %{http_code}\n" -H "Content-Type: application/json" \
             -d "$PAYLOAD" \
             "$DISCORD_WEBHOOK_URL"

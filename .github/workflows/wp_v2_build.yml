@@ -281,6 +281,6 @@ jobs:
           fi
           BODY="${BODY}\n${RUN_URL}"
 
-          curl -s -H "Content-Type: application/json" \
+          curl -sS -w "\nHTTP %{http_code}\n" -H "Content-Type: application/json" \
             -d "{\"content\": \"$(echo -e "$BODY")\"}" \
             "$DISCORD_WEBHOOK_URL"
