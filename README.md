@@ -284,7 +284,7 @@ export WANDB_API_KEY="your-wandb-key"
 |-------|------|-------------|
 | `mlb_wp.play_states` | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗） |
 | `mlb_shared.statcast_pitches` | 6,838,542 | **Statcast 全投球データ**（2015–2024、pybaseball 全 118 カラム + computed 4 = 122 列、4.77 GB）— [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理 |
-| `mlb_statcast.raw_park_factors` | 329 | 球場パークファクター（savant-extras） |
+| `mlb_shared.park_factors` | 329 | 球場パークファクター（savant-extras）— [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 管理 |
 | `mlb_wp.fg_batting_stats` | ~5,300 | **FanGraphs 打者シーズン成績**（wRC+/選球眼/打球傾向/走塁/WAR 等 40+ 指標、2015-2024） |
 | `mlb_wp.fg_pitching_stats` | ~4,300 | **FanGraphs 投手シーズン成績**（Stuff+/SIERA/ERA-/ゾーン制球/WAR 等 45+ 指標、2015-2024） |
 | `mlb_wp.statcast_sprint_speed` | 4,975 | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2016-2024） |
@@ -338,7 +338,7 @@ BigQuery
 │     ↓
 │   Benchmark: MLB home_win_exp (Statcast API)
 │     ↓
-│   Park factors (mlb_statcast.raw_park_factors)
+│   Park factors (mlb_shared.park_factors)
 └──────────────────────────────────────────────────┘
     ↓
 results/ (JSON + posterior samples + calibrator.pkl)
