@@ -387,6 +387,8 @@ gh workflow run "Validate WP Model" \
   -f season=2024 -f optimize=true -f n_trials=500
 ```
 
+**CI 可観測性**: 全 6 ワークフロー・15 スクリプトに `PYTHONUNBUFFERED=1` + ステップ別経過時間ログを追加。学習・シミュレーションのハング時にどのフェーズで停止したかをログから即座に特定できる。
+
 ### Cloud Run API
 
 | 項目 | 値 |
