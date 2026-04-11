@@ -389,13 +389,11 @@ gh workflow run "Validate WP Model" \
 
 **CI 可観測性**: 全 6 ワークフロー・15 スクリプトに `PYTHONUNBUFFERED=1` + ステップ別経過時間ログを追加。学習・シミュレーションのハング時にどのフェーズで停止したかをログから即座に特定できる。
 
-### Cloud Run API
+### FastAPI（ローカル / RPi5）
 
 | 項目 | 値 |
 |---|---|
-| URL | デプロイ済み（認証付き） |
 | Swagger UI | ローカル起動: `http://localhost:8001/docs` |
-| Artifact Registry | `us-central1-docker.pkg.dev/data-platform-490901/apis/mlb-win-probability-api` |
 | メモリ | 256Mi |
 
 ## Roadmap
@@ -404,7 +402,6 @@ gh workflow run "Validate WP Model" \
 - [x] WP エンジン v1（Markov Chain + Normal 近似 + Optuna 5 パラメータ最適化）
 - [x] FastAPI + Streamlit ダッシュボード（バイリンガル、ライブフィード、What-If）
 - [x] BigQuery データ基盤（367K+ play states、BQ エクスポートで秒単位データ取得）
-- [x] Cloud Run API デプロイ（認証付き、Artifact Registry）
 - [x] Grafana ダッシュボード（BQ 接続、公開）
 
 ### Phase 2a: State-based 精度追い込み ✅
@@ -461,7 +458,6 @@ gh workflow run "Validate WP Model" \
 
 ### Phase 5: 統合デプロイ
 - [ ] 本番エンジン切り替え（アンサンブル or 最良エンジン）
-- [ ] Cloud Run 再デプロイ（アンサンブル + AI Commentary + BQML 統合）
 - [ ] W&B Dashboard 構築（品質スコア・Brier Score の時系列可視化）
 
 ## License
