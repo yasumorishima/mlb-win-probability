@@ -6,6 +6,11 @@
 
 ---
 
+> **📢 2026-04-19 インフラ移行**
+> BigQuery `mlb_shared` は退役済。データは RPi5 Parquet (`/mnt/ssd/mlb_shared/`) に一元化され、訓練パイプラインは RPi5 前提での再設計待ちです。現状は **ランタイム（FastAPI / Streamlit / 既存モデル成果物）のみ稼働** しており、新規モデル学習ワークフローは本リポに含まれません。
+
+---
+
 **5 エンジン + アンサンブル構成：**
 
 | Engine | Approach |
@@ -17,7 +22,7 @@
 | **Bayesian Hierarchical** | NumPyro SVI — **Statcast LightGBM ベース** + チーム力・球場・時代効果 + **90% 信用区間** |
 
 5 エンジンを **inverse-Brier 加重アンサンブル** + **Isotonic Regression キャリブレーション**で統合。
-学習・検証データは BigQuery から取得。FanGraphs / Savant の共有データは **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline)**（`mlb_shared` データセット）で一元管理。
+学習・検証データは **RPi5 Parquet (`/mnt/ssd/mlb_shared/`)** から取得（従来 BigQuery だったが 2026-04-19 退役）。FanGraphs / Savant の共有データは **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline)** が取得・管理。
 
 ### Bayesian Hierarchical Model
 
@@ -76,7 +81,7 @@ streamlit run streamlit_app.py
 
 ## Grafana Dashboard
 
-[MLB Win Probability](https://yasumorishima.grafana.net/public-dashboards/8cf85d216d6e47068c3dcc7e807ac337) — Situation-based win expectancy analysis from 367K+ play states (2015–2024). Connected to BigQuery `data-platform-490901.mlb_shared` + `mlb_wp`.
+[MLB Win Probability](https://yasumorishima.grafana.net/public-dashboards/8cf85d216d6e47068c3dcc7e807ac337) — Situation-based win expectancy analysis from 367K+ play states (2015–2024). 現在は `mlb_wp.play_states` のみ参照（`mlb_shared` は 2026-04-19 退役、play_states は BigQuery `mlb_wp` に残存）。
 
 ![MLB Win Probability — Grafana Dashboard](docs/images/grafana-preview.png)
 
@@ -274,26 +279,26 @@ export WANDB_API_KEY="your-wandb-key"
 
 **165 特徴量**（Statcast 76: 投球速度・変化量・打球・バットトラッキング・ゾーン・軌道等 + FanGraphs 投手 46: Stuff+/SIERA/ERA-/ゾーン別制球等 + FanGraphs 打者 35: wRC+/選球眼/打球傾向/走塁等 + 走塁守備 8: sprint speed/OAA/catcher pop time・arm strength）、Optuna 50 trial。MLB Stats API live feed からリアルタイム取得可能。
 
-### データ基盤（BigQuery）
+### データ基盤（RPi5 Parquet）
 
-全データは **BigQuery** に格納。学習・検証パイプラインは BQ から直接取得。
+**2026-04-19 BigQuery `mlb_shared` 退役**。全共有データは RPi5 `/mnt/ssd/mlb_shared/` に Parquet で一元化。
 
-> **共有データ基盤**: FanGraphs / Savant の生データは [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) で取得・管理し、`mlb_shared` データセットに格納。
+> **共有データ基盤**: FanGraphs / Savant の生データは [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が取得・管理（RPi5 backfill orchestrator + systemd timer）。
 
 | Table | Rows | Description |
 |-------|------|-------------|
-| `mlb_wp.play_states` | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗）— WP 固有 |
-| `mlb_shared.statcast_pitches` | 6,979,356 | **Statcast 全投球データ**（2015–2024、122 カラム、4.85 GB） |
-| `mlb_shared.park_factors` | 329 | 球場パークファクター（savant-extras、2015-2025） |
-| `mlb_shared.fg_batting` | 5,703 | **FanGraphs 打者シーズン成績**（321 カラム全量、2015-2025、qual=50） |
-| `mlb_shared.fg_pitching` | 4,648 | **FanGraphs 投手シーズン成績**（394 カラム全量、2015-2025、qual=30） |
-| `mlb_shared.fg_pitcher_plus` | 2,383 | **Stuff+/Location+/Pitching+** 球種別（2020+、31 カラム） |
-| `mlb_shared.sprint_speed` | 6,104 | **Statcast スプリント速度**（打者走力、hp_to_1b、bolts、2015+） |
-| `mlb_shared.oaa` | 2,696 | **Statcast OAA**（7 ポジション別 Outs Above Average、2016+） |
-| `mlb_shared.oaa_team` | 300 | **チーム OAA 集計**（チーム×シーズン別の合計/平均 OAA） |
-| `mlb_shared.catcher` | 859 | **Statcast 捕手能力**（pop time、arm strength、exchange time、2015+） |
+| `mlb_wp.play_states` (BigQuery 残存) | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗）— WP 固有 |
+| `statcast_pitches` | ~7.7M | **Statcast 全投球データ**（2015–2025、122 カラム） |
+| `park_factors` | 329 | 球場パークファクター（savant-extras、2015-2025） |
+| `fg_batting` | 5,703 | **FanGraphs 打者シーズン成績**（2015-2025、qual=50） |
+| `fg_pitching` | 4,648 | **FanGraphs 投手シーズン成績**（2015-2025、qual=30） |
+| `fg_pitcher_plus` | 2,383 | **Stuff+/Location+/Pitching+** 球種別（2020+） |
+| `sprint_speed` | 6,104 | **Statcast スプリント速度**（2015+） |
+| `oaa` | 2,696 | **Statcast OAA**（7 ポジション別、2016+） |
+| `oaa_team` | 300 | **チーム OAA 集計** |
+| `catcher` | 859 | **Statcast 捕手能力**（pop time、arm strength、2015+） |
 
-> 全共有データ（16 テーブル / 4.88 GB）は [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が毎週月曜に自動更新。`mlb_wp` には WP 固有の `play_states` のみ残存。
+> 全共有データ（16 テーブル / 927MB Parquet）は [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が RPi5 上で定期更新。`mlb_wp` には WP 固有の `play_states` のみ残存。
 
 Statcast データは pybaseball 全 118 カラム + computed 4 = **122 カラム**を保持（投球速度・変化量・打球速度・発射角度・xwOBA・バットトラッキング・選手年齢・ストライクゾーン・リリースポイント・投球軌道・MLB ベンチマーク WP 等）。WP モデル学習時は**レギュラーシーズン打席結果のみ（`game_type = 'R' AND events IS NOT NULL`）**に絞り、約 181 万打席で学習。
 
@@ -318,37 +323,11 @@ ensemble_pred = Σ(w_i × pred_i) / Σ(w_i)
 
 さらに **Isotonic Regression** でキャリブレーション補正し、ECE（Expected Calibration Error）を削減。
 
-### 検証パイプライン
+### 検証パイプライン（過去実装、2026-04-19 退役）
 
-```
-BigQuery
-├── mlb_wp.play_states (367K)       ── state-based engines ────┐
-│     ↓ export_from_bq.py                                      │
-│   v1 Normal / v2 Empirical / LightGBM(state)                 │
-│     ↓                                                         │
-│   train_wp_bayesian.py (NumPyro SVI, Statcast LightGBM base)  │
-│     ↓                                                         │
-│   Bayesian Hierarchical (Statcast + team/park/season/leverage)├→ 本番WP
-│     ↓ 90% credible intervals                                  │
-│                                                               │
-│   Ensemble (inverse-Brier weighted, 5 engines)               │
-│     ↓                                                         │
-│   Leave-one-year-out CV (2015–2024)                          │
-│                                                               │
-├── mlb_shared.statcast_pitches (6.8M) ── Statcast engine ───┘
-│     ↓ preflight.py (7テーブル・カラム・join検証 → 失敗時即停止+デバッグ出力)
-│     ↓ train_wp_statcast.py
-│   LightGBM(Statcast+FG, 157 features, Optuna)
-│     ↓
-│   Benchmark: MLB home_win_exp (Statcast API)
-│     ↓
-│   Park factors (mlb_shared.park_factors)
-└──────────────────────────────────────────────────┘
-    ↓
-results/ (JSON + posterior samples + calibrator.pkl)
-    ↓
-Streamlit (WP gauge + CI band) + Discord notification
-```
+> 以下は 2026-04-19 まで稼働していた BigQuery + GitHub Actions ベースの学習パイプライン。BQ 退役と訓練 CI の手動実行停滞を受けて、訓練フローは一旦撤去。既存の学習済みモデル成果物（`data/wp_statcast_lgbm.txt` / `data/conformal_quantiles.json` / `data/wp_statcast_results.json`）はリポジトリ内に保持、ランタイム推論のみ継続稼働。
+>
+> 将来的には **RPi5 Parquet 前提での再設計**（データ転送戦略 + BQML → Python ML 書換）を別セッションで実施予定。
 
 ### メトリクス
 
@@ -371,23 +350,17 @@ Optuna（TPE sampler, 500 trial）で Brier Score **+3.85%** 改善（0.1651 →
 | `top9_lambda_mult` | 9 回表ホームリード時 Poisson λ倍率 | 0.67 |
 | `extras_win_prob` | 延長戦ホーム勝率 | 0.41 |
 
-### ワークフロー
+### ワークフロー（現存）
 
 ```bash
-# 3エンジン比較 + アンサンブル + 年次CV（BQから自動データ取得）
-gh workflow run "Build WP v2" \
-  --repo yasumorishima/mlb-win-probability \
-  -f memo="ensemble + calibration + CV" \
-  -f step=wp_v2_full
-
-# v1 単体の Optuna 最適化
+# v1 Optuna 最適化（BQ 非依存、ローカルデータで完結）
 gh workflow run "Validate WP Model" \
   --repo yasumorishima/mlb-win-probability \
   -f memo="2024 full season" \
   -f season=2024 -f optimize=true -f n_trials=500
 ```
 
-**CI 可観測性**: 全 6 ワークフロー・15 スクリプトに `PYTHONUNBUFFERED=1` + ステップ別経過時間ログを追加。学習・シミュレーションのハング時にどのフェーズで停止したかをログから即座に特定できる。
+**2026-04-19 削除済み workflow**: `Build WP v2` / `Train Statcast WP Model` / `Train Bayesian WP Model` / `Train Ensemble WP Model` / `Verify BQ Data Integrity` / `Reload Statcast BQ` / `GCP Deploy`。BQ 依存に加えて 2026-03-26 以降実行ゼロ → 事実上停止状態で削除。再設計後に RPi5 Parquet 前提の新 workflow を導入予定。
 
 ### FastAPI（ローカル / RPi5）
 
@@ -401,8 +374,8 @@ gh workflow run "Validate WP Model" \
 ### Phase 1: 基盤構築 ✅
 - [x] WP エンジン v1（Markov Chain + Normal 近似 + Optuna 5 パラメータ最適化）
 - [x] FastAPI + Streamlit ダッシュボード（バイリンガル、ライブフィード、What-If）
-- [x] BigQuery データ基盤（367K+ play states、BQ エクスポートで秒単位データ取得）
-- [x] Grafana ダッシュボード（BQ 接続、公開）
+- [x] BigQuery データ基盤（367K+ play states） — **2026-04-19 `mlb_shared` 退役、Parquet 化完了**
+- [x] Grafana ダッシュボード（`mlb_wp.play_states` 接続、公開継続中）
 
 ### Phase 2a: State-based 精度追い込み ✅
 - [x] v2 エンジン構築（10 年分実データ WP テーブル + Markov Chain フォールバック）
@@ -449,16 +422,19 @@ gh workflow run "Validate WP Model" \
 - [ ] プロンプト v3 改善（v2 の品質スコア分析結果ベース）
 
 ### Phase 4: データ基盤統合 + Preflight ✅
-- [x] **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 構築**（baseball-mlops との共有 BQ データ基盤、`mlb_shared` データセット）
+- [x] **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) 構築**（baseball-mlops との共有データ基盤）
 - [x] `statcast_pitches` 参照先を `mlb_shared` に切り替え
 - [x] `mlb_wp.statcast_pitches` → `mlb_shared.statcast_pitches` 移行
 - [x] FG stats / fielding テーブルを `mlb_shared` に統合（テーブル名統一、WP独自fetchスクリプト削除）
 - [x] `mlb_wp` に残るのは `play_states` のみ
-- [x] **Preflight check 導入** — 学習前に全 7 BQ テーブル存在・行数・sanitized カラム名・join key 整合性を自動検証。問題時は fuzzy match 候補・SQL 本文・unmatched サンプルキーを出力して即停止
+- [x] **Preflight check 導入** — 学習前に全テーブル存在・行数・sanitized カラム名・join key 整合性を自動検証
+- [x] **2026-04-19 BQ `mlb_shared` 退役、RPi5 Parquet に一元化**（17 work units backfill 完走、reconcile 検証完了）
 
-### Phase 5: 統合デプロイ
-- [ ] 本番エンジン切り替え（アンサンブル or 最良エンジン）
-- [ ] W&B Dashboard 構築（品質スコア・Brier Score の時系列可視化）
+### Phase 5: 訓練パイプライン再設計（次セッション予定）
+- [ ] RPi5 Parquet → GH Actions ubuntu-latest へのデータ転送戦略確定（Tailscale + rsync 等）
+- [ ] 165 特徴量訓練 workflow を BQ 非依存で再実装
+- [ ] Bayesian / Ensemble / Conformal 学習パイプライン復活
+- [ ] 本番エンジン切り替え + W&B Dashboard
 
 ## License
 
