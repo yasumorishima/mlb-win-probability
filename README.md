@@ -79,12 +79,6 @@ docker compose up --build
 streamlit run streamlit_app.py
 ```
 
-## Grafana Dashboard
-
-[MLB Win Probability](https://yasumorishima.grafana.net/public-dashboards/8cf85d216d6e47068c3dcc7e807ac337) — Situation-based win expectancy analysis from 367K+ play states (2015–2024). 現在は `mlb_wp.play_states` のみ参照（`mlb_shared` は 2026-04-19 退役、play_states は BigQuery `mlb_wp` に残存）。
-
-![MLB Win Probability — Grafana Dashboard](docs/images/grafana-preview.png)
-
 ## API Endpoints
 
 ### `GET /wp` — Win Probability + LI + Tactics
@@ -287,7 +281,7 @@ export WANDB_API_KEY="your-wandb-key"
 
 | Table | Rows | Description |
 |-------|------|-------------|
-| `mlb_wp.play_states` (BigQuery 残存) | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗）— WP 固有 |
+| `play_states` (RPi5 Parquet `/mnt/ssd/mlb_wp_shared/`) | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗）— WP 固有、2026-04-19 BQ 退役 |
 | `statcast_pitches` | ~7.7M | **Statcast 全投球データ**（2015–2025、122 カラム） |
 | `park_factors` | 329 | 球場パークファクター（savant-extras、2015-2025） |
 | `fg_batting` | 5,703 | **FanGraphs 打者シーズン成績**（2015-2025、qual=50） |
@@ -374,8 +368,8 @@ gh workflow run "Validate WP Model" \
 ### Phase 1: 基盤構築 ✅
 - [x] WP エンジン v1（Markov Chain + Normal 近似 + Optuna 5 パラメータ最適化）
 - [x] FastAPI + Streamlit ダッシュボード（バイリンガル、ライブフィード、What-If）
-- [x] BigQuery データ基盤（367K+ play states） — **2026-04-19 `mlb_shared` 退役、Parquet 化完了**
-- [x] Grafana ダッシュボード（`mlb_wp.play_states` 接続、公開継続中）
+- [x] BigQuery データ基盤（367K+ play states） — **2026-04-19 `mlb_shared` + `mlb_wp` 両方退役、RPi5 Parquet 化完了**
+- [x] ~~Grafana ダッシュボード~~ — **2026-04-19 廃止**（Streamlit で代替）
 
 ### Phase 2a: State-based 精度追い込み ✅
 - [x] v2 エンジン構築（10 年分実データ WP テーブル + Markov Chain フォールバック）
