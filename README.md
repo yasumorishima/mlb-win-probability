@@ -281,7 +281,7 @@ export WANDB_API_KEY="your-wandb-key"
 
 | Table | Rows | Description |
 |-------|------|-------------|
-| `play_states` (RPi5 Parquet `/mnt/ssd/mlb_wp_shared/`) | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗）— WP 固有、2026-04-19 BQ 退役 |
+| `play_states` (Hugging Face `mlb_wp/`) | 367,564 | ゲーム状態（イニング・アウト・走者・点差 → 勝敗）— WP 固有、2026-04-19 BQ 退役 |
 | `statcast_pitches` | ~7.7M | **Statcast 全投球データ**（2015–2025、122 カラム） |
 | `park_factors` | 329 | 球場パークファクター（savant-extras、2015-2025） |
 | `fg_batting` | 5,703 | **FanGraphs 打者シーズン成績**（2015-2025、qual=50） |
