@@ -7,7 +7,7 @@
 ---
 
 > **📢 2026-04-19 インフラ移行**
-> BigQuery `mlb_shared` は退役済。データは RPi5 Parquet (`/mnt/ssd/mlb_shared/`) に一元化され、訓練パイプラインは RPi5 前提での再設計待ちです。現状は **ランタイム（FastAPI / Streamlit / 既存モデル成果物）のみ稼働** しており、新規モデル学習ワークフローは本リポに含まれません。
+> BigQuery `mlb_shared` は退役済。データの正本は [Hugging Face `yasumorishima/mlb-stats`](https://huggingface.co/datasets/yasumorishima/mlb-stats)（`play_states` は `mlb_wp/` 以下、共有テーブルはルート直下・[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が毎週更新）。以前の RPi5 Parquet（`/mnt/ssd/...`）は 2026-10-08 時点で存在しない。公開して動いているのは **Streamlit デモ**だけで、FastAPI は手元で起動して使うもの（公開サーバーは無い）。新規モデル学習ワークフローは本リポに含まれない。
 
 ---
 
@@ -22,7 +22,7 @@
 | **Bayesian Hierarchical** | NumPyro SVI — **Statcast LightGBM ベース** + チーム力・球場・時代効果 + **90% 信用区間** |
 
 5 エンジンを **inverse-Brier 加重アンサンブル** + **Isotonic Regression キャリブレーション**で統合。
-学習・検証データは **RPi5 Parquet (`/mnt/ssd/mlb_shared/`)** から取得（従来 BigQuery だったが 2026-04-19 退役）。FanGraphs / Savant の共有データは **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline)** が取得・管理。
+学習・検証データは **[Hugging Face `yasumorishima/mlb-stats`](https://huggingface.co/datasets/yasumorishima/mlb-stats)** にある（従来 BigQuery → RPi5 Parquet を経て移行。RPi5 の保存先はもう無い）。FanGraphs / Savant の共有データは **[mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline)** が取得・管理。
 
 ### Bayesian Hierarchical Model
 
@@ -273,9 +273,9 @@ export WANDB_API_KEY="your-wandb-key"
 
 **165 特徴量**（Statcast 76: 投球速度・変化量・打球・バットトラッキング・ゾーン・軌道等 + FanGraphs 投手 46: Stuff+/SIERA/ERA-/ゾーン別制球等 + FanGraphs 打者 35: wRC+/選球眼/打球傾向/走塁等 + 走塁守備 8: sprint speed/OAA/catcher pop time・arm strength）、Optuna 50 trial。MLB Stats API live feed からリアルタイム取得可能。
 
-### データ基盤（RPi5 Parquet）
+### データ基盤（Hugging Face）
 
-**2026-04-19 BigQuery `mlb_shared` 退役**。全共有データは RPi5 `/mnt/ssd/mlb_shared/` に Parquet で一元化。
+**2026-04-19 BigQuery `mlb_shared` 退役**。その後 RPi5 の Parquet を経て、現在の正本は [Hugging Face `yasumorishima/mlb-stats`](https://huggingface.co/datasets/yasumorishima/mlb-stats)（下の表の場所の記述は移行前のもの）。
 
 > **共有データ基盤**: FanGraphs / Savant の生データは [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が取得・管理（RPi5 backfill orchestrator + systemd timer）。
 
@@ -292,7 +292,7 @@ export WANDB_API_KEY="your-wandb-key"
 | `oaa_team` | 300 | **チーム OAA 集計** |
 | `catcher` | 859 | **Statcast 捕手能力**（pop time、arm strength、2015+） |
 
-> 全共有データ（16 テーブル / 927MB Parquet）は [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が RPi5 上で定期更新。`mlb_wp` には WP 固有の `play_states` のみ残存。
+> 全共有データは [mlb-data-pipeline](https://github.com/yasumorishima/mlb-data-pipeline) が GitHub Actions で毎週更新し、Hugging Face に公開している（`statcast_pitches` は Hugging Face に無い）。`mlb_wp` には WP 固有の `play_states` のみ残存。
 
 Statcast データは pybaseball 全 118 カラム + computed 4 = **122 カラム**を保持（投球速度・変化量・打球速度・発射角度・xwOBA・バットトラッキング・選手年齢・ストライクゾーン・リリースポイント・投球軌道・MLB ベンチマーク WP 等）。WP モデル学習時は**レギュラーシーズン打席結果のみ（`game_type = 'R' AND events IS NOT NULL`）**に絞り、約 181 万打席で学習。
 
