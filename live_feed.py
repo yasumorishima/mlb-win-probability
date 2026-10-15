@@ -12,6 +12,7 @@ second.
 """
 
 import json
+import http.client
 import urllib.request
 import urllib.error
 from datetime import datetime, timezone
@@ -24,12 +25,15 @@ AUTO_RUNNER_GAME_TYPES = ("R", "S")
 
 
 def _fetch(url: str) -> dict | None:
-    """GET JSON from url. Returns None on any network or HTTP error."""
+    """GET JSON from url. Returns None on any network, HTTP or decoding error
+    (ValueError covers JSONDecodeError and UnicodeDecodeError; HTTPException
+    covers InvalidURL and IncompleteRead)."""
     try:
         with urllib.request.urlopen(url, timeout=10) as resp:
-            return json.loads(resp.read().decode())
-    except (urllib.error.URLError, urllib.error.HTTPError, json.JSONDecodeError, OSError):
+            data = json.loads(resp.read().decode())
+    except (urllib.error.URLError, http.client.HTTPException, ValueError, OSError):
         return None
+    return data if isinstance(data, dict) else None
 
 
 def get_todays_games(date: str | None = None) -> list[dict]:
@@ -53,14 +57,31 @@ def get_todays_games(date: str | None = None) -> list[dict]:
     games = []
     for date_entry in data.get("dates", []):
         for g in date_entry.get("games", []):
+            if "gamePk" not in g:
+                continue
+            teams = g.get("teams", {})
             games.append({
                 "gamePk": g["gamePk"],
-                "away_team": g["teams"]["away"]["team"]["name"],
-                "home_team": g["teams"]["home"]["team"]["name"],
-                "status": g["status"]["detailedState"],
+                "away_team": teams.get("away", {}).get("team", {}).get("name", "Away"),
+                "home_team": teams.get("home", {}).get("team", {}).get("name", "Home"),
+                "status": g.get("status", {}).get("detailedState", "Unknown"),
                 "start_time_utc": g.get("gameDate", ""),
             })
     return games
+
+
+GAME_OVER_PREFIXES = ("Final", "Game Over", "Completed Early")
+NO_STATE_PREFIXES = GAME_OVER_PREFIXES + ("Postponed", "Cancelled", "Suspended")
+
+
+def is_game_over_status(status: str) -> bool:
+    return status.startswith(GAME_OVER_PREFIXES)
+
+
+def has_live_state(status: str) -> bool:
+    """False when the game is over or not being played, so its state is not
+    something to analyse."""
+    return not status.startswith(NO_STATE_PREFIXES)
 
 
 def _game_rules(data: dict) -> tuple[int, bool]:
@@ -150,8 +171,9 @@ def parse_live_state(data: dict) -> dict:
         balls, strikes = count.get("balls", 0), count.get("strikes", 0)
 
     # Three outs: the next state is the start of the next half, not
-    # "two outs" of the half that just ended.
-    if outs >= 3:
+    # "two outs" of the half that just ended. A finished game has no next
+    # half, so it keeps the state its last play left.
+    if outs >= 3 and not is_game_over_status(status):
         if top_bottom == "top":
             top_bottom = "bottom"
         else:
@@ -301,7 +323,7 @@ def live_wp(state: dict) -> dict:
         return {**state, "status_note": "Game not yet started", "win_probability": None}
     if status.startswith(("Postponed", "Cancelled", "Suspended")):
         return {**state, "status_note": status, "win_probability": None}
-    if status.startswith(("Final", "Game Over", "Completed Early")):
+    if is_game_over_status(status):
         h, a = state["score_home"], state["score_away"]
         if h == a:
             return {**state, "status_note": "Game over (tie)", "win_probability": None}

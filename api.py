@@ -7,9 +7,11 @@ state, computed by the engine fitted to real plate-appearance transitions
 Claude (strategist.py) for a recommendation; it needs ANTHROPIC_API_KEY.
 """
 
+import hmac
+import os
 from enum import Enum
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
 from analysis import (
@@ -53,6 +55,10 @@ app.add_middleware(
 )
 
 
+EXTRA_RUNNER_DOC = ("Extra innings start with a runner on second (regular season 2020+). "
+                    "Set false for the postseason and for earlier seasons.")
+
+
 class Lang(str, Enum):
     ja = "JA"
     en = "EN"
@@ -67,12 +73,13 @@ ScenarioName = Enum("ScenarioName", {k: k for k in SCENARIOS}, type=str)
 
 
 def _analysis(inning, top_bottom, outs, runner1, runner2, runner3, score_diff,
-              scheduled_innings, balls, strikes):
+              scheduled_innings, balls, strikes, extra_runner=True):
     if (balls is None) != (strikes is None):
         raise HTTPException(status_code=422, detail="give both balls and strikes, or neither")
     try:
         return full_analysis(inning, top_bottom.value, outs, (runner1, runner2, runner3),
-                             score_diff, scheduled_innings, balls, strikes)
+                             score_diff, scheduled_innings, balls, strikes,
+                             extra_runner=extra_runner)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
 
@@ -118,9 +125,10 @@ def get_wp(
     scheduled_innings: int = Query(default=9, ge=1, le=9, description="Scheduled innings (9; 7 for 2020-21 doubleheaders)"),
     balls: int | None = Query(default=None, ge=0, le=3, description="Balls in the current count (optional)"),
     strikes: int | None = Query(default=None, ge=0, le=2, description="Strikes in the current count (optional)"),
+    extra_runner: bool = Query(default=True, description=EXTRA_RUNNER_DOC),
 ):
     return _analysis(inning, top_bottom, outs, runner1, runner2, runner3, score_diff,
-                     scheduled_innings, balls, strikes)
+                     scheduled_innings, balls, strikes, extra_runner)
 
 
 @app.get(
@@ -130,7 +138,9 @@ def get_wp(
         "Claude's recommendation for the next pitch, from the situation and the engine's numbers "
         "(the same analysis as /wp). Returns the recommendation, its reason, the numbers it cited "
         "and any cited number that does not match the input. "
-        "Requires the `ANTHROPIC_API_KEY` environment variable (503 otherwise)."
+        "Requires the `ANTHROPIC_API_KEY` and `ADVICE_TOKEN` environment variables (503 "
+        "otherwise) and the header `X-Advice-Token` equal to `ADVICE_TOKEN` (401 otherwise), "
+        "so that nobody else can spend the key."
     ),
 )
 def get_wp_advice(
@@ -145,14 +155,20 @@ def get_wp_advice(
     balls: int | None = Query(default=None, ge=0, le=3, description="Balls (optional)"),
     strikes: int | None = Query(default=None, ge=0, le=2, description="Strikes (optional)"),
     lang: Lang = Query(default=Lang.en, description="Language of the reason (EN or JA)"),
+    extra_runner: bool = Query(default=True, description=EXTRA_RUNNER_DOC),
+    x_advice_token: str | None = Header(default=None, description="Must equal ADVICE_TOKEN"),
 ):
-    if not has_api_key():
+    token = os.environ.get("ADVICE_TOKEN", "")
+    if not has_api_key() or not token:
         raise HTTPException(
             status_code=503,
-            detail="ANTHROPIC_API_KEY is not set. Set it in the server environment to enable /wp/advice.",
+            detail=("/wp/advice is disabled. Set ANTHROPIC_API_KEY and ADVICE_TOKEN in the "
+                    "server environment to enable it."),
         )
+    if not x_advice_token or not hmac.compare_digest(x_advice_token.encode(), token.encode()):
+        raise HTTPException(status_code=401, detail="missing or wrong X-Advice-Token header")
     result = _analysis(inning, top_bottom, outs, runner1, runner2, runner3, score_diff,
-                       scheduled_innings, balls, strikes)
+                       scheduled_innings, balls, strikes, extra_runner)
     if result["game_over"]:
         raise HTTPException(status_code=422, detail="the game is over in this state")
     adv, problems, payload = get_advice(result, lang.value)
@@ -191,6 +207,7 @@ def get_wpa(
     after_runner3: int = Query(default=0, ge=0, le=1, description="Runner on 3B after"),
     after_score_diff: int = Query(default=0, ge=-30, le=30, description="Score diff after"),
     scheduled_innings: int = Query(default=9, ge=1, le=9, description="Scheduled innings"),
+    extra_runner: bool = Query(default=True, description=EXTRA_RUNNER_DOC),
 ):
     before = GameState(before_inning, before_top_bottom.value, before_outs,
                        (before_runner1, before_runner2, before_runner3),
@@ -199,7 +216,7 @@ def get_wpa(
                       (after_runner1, after_runner2, after_runner3),
                       after_score_diff, scheduled_innings)
     try:
-        result = wpa(before, after)
+        result = wpa(before, after, extra_runner)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
     for key, s in (("before_state", before), ("after_state", after)):
@@ -240,7 +257,8 @@ def get_scenario(name: ScenarioName = Query(description="Scenario name")):
     description="Return today's MLB games with status (Scheduled / In Progress / Final).",
 )
 def games_today(
-    date: str | None = Query(default=None, description="Date in YYYY-MM-DD (default: today UTC)"),
+    date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$",
+                             description="Date in YYYY-MM-DD (default: today UTC)"),
 ):
     games = get_todays_games(date)
     return {"date": date or "today", "count": len(games), "games": games}

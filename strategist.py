@@ -12,8 +12,10 @@ Replaces gemini_commentary.py. Two uses:
   part that can be scored against what actually happened.
 
 The API key is read from ANTHROPIC_API_KEY. Without it the functions
-return None; the public demo shows stored results instead of calling the
-API, so nobody can spend the key through the app.
+return None and nothing is sent. The public demo has no key, so it never
+calls the API. Wherever a key is configured, each call is one request
+(at most one SDK retry, 60 s timeout); the app caps calls per session and
+per day, and the API's /wp/advice also needs ADVICE_TOKEN.
 """
 
 from __future__ import annotations
@@ -88,7 +90,7 @@ def _client():
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
     import anthropic
-    return anthropic.Anthropic()
+    return anthropic.Anthropic(max_retries=1, timeout=60.0)
 
 
 def _schema(model: type[BaseModel]) -> dict:

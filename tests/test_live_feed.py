@@ -104,3 +104,32 @@ def test_live_wp_statuses():
     assert live_wp({**base, "status": "Final", "score_home": 3})["win_probability"] == 1.0
     assert live_wp({**base, "status": "Final", "score_away": 3})["win_probability"] == 0.0
     assert 0 < live_wp({**base, "status": "In Progress"})["win_probability"] < 1
+
+
+def _final_feed(status):
+    # last play: the third out of the top of the 9th, home team ahead
+    last = _play(9, True, 3, (0, 0, 0), 5, 2, event="Groundout")
+    f = _feed([last], current=last)
+    f["gameData"]["status"]["detailedState"] = status
+    f["liveData"]["linescore"]["teams"] = {"home": {"runs": 5}, "away": {"runs": 2}}
+    return f
+
+
+def test_finished_game_has_no_next_half():
+    s = parse_live_state(_final_feed("Final"))
+    assert (s["inning"], s["top_bottom"]) == (9, "top")
+    s = parse_live_state(_final_feed("In Progress"))
+    assert (s["inning"], s["top_bottom"], s["outs"]) == (9, "bottom", 0)
+
+
+def test_has_live_state():
+    from live_feed import has_live_state
+    for st in ("Final", "Game Over", "Completed Early", "Postponed", "Cancelled", "Suspended: Rain"):
+        assert not has_live_state(st), st
+    for st in ("In Progress", "Scheduled", "Manager challenge"):
+        assert has_live_state(st), st
+
+
+def test_bad_date_returns_no_games():
+    from live_feed import get_todays_games
+    assert get_todays_games("2026-10-15 x") == []

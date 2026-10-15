@@ -66,8 +66,10 @@ def test_advice_with_key_uses_strategist(monkeypatch):
                                                      "players": players})
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    monkeypatch.setenv("ADVICE_TOKEN", "tok")
     monkeypatch.setattr(strategist, "advise", fake_advise)
-    r = client.get("/wp/advice", params=dict(inning=8, top_bottom="bottom", outs=0, runner1=1))
+    r = client.get("/wp/advice", params=dict(inning=8, top_bottom="bottom", outs=0, runner1=1),
+                   headers={"X-Advice-Token": "tok"})
     assert r.status_code == 200
     body = r.json()
     assert body["advice"]["recommendation"] == "steal_2b"
@@ -116,6 +118,47 @@ def test_advice_api_error_is_502(monkeypatch):
         raise TimeoutError("slow")
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    monkeypatch.setenv("ADVICE_TOKEN", "tok")
     monkeypatch.setattr(strategist, "advise", boom)
-    r = client.get("/wp/advice", params=dict(inning=8, top_bottom="bottom", outs=0, runner1=1))
+    r = client.get("/wp/advice", params=dict(inning=8, top_bottom="bottom", outs=0, runner1=1),
+                   headers={"X-Advice-Token": "tok"})
     assert r.status_code == 502 and "TimeoutError" in r.json()["detail"]
+
+
+def _no_call(*args):
+    raise AssertionError("strategist.advise must not be called")
+
+
+@pytest.mark.parametrize("token,header,status", [
+    ("", "tok", 503),          # key but no ADVICE_TOKEN configured
+    ("tok", None, 401),        # no header
+    ("tok", "wrong", 401),     # wrong header
+])
+def test_advice_needs_token(monkeypatch, token, header, status):
+    import strategist
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    monkeypatch.setenv("ADVICE_TOKEN", token)
+    monkeypatch.setattr(strategist, "advise", _no_call)
+    headers = {"X-Advice-Token": header} if header is not None else {}
+    r = client.get("/wp/advice", params=dict(inning=8, top_bottom="bottom", outs=0, runner1=1),
+                   headers=headers)
+    assert r.status_code == status, r.text
+
+
+def test_extra_runner_parameter():
+    q = dict(inning=10, top_bottom="top", outs=0)
+    with_r = client.get("/wp", params=q).json()["win_probability"]
+    without = client.get("/wp", params={**q, "extra_runner": "false"}).json()["win_probability"]
+    assert with_r == round(analysis.home_wp(10, "top", 0, (0, 0, 0), 0), 4)
+    assert without == round(analysis.home_wp(10, "top", 0, (0, 0, 0), 0, extra_runner=False), 4)
+    assert with_r != without
+    p = dict(before_inning=10, before_top_bottom="top", before_outs=0, after_inning=10,
+             after_top_bottom="top", after_outs=1)
+    d1 = client.get("/wp/play", params=p).json()["wpa"]
+    d0 = client.get("/wp/play", params={**p, "extra_runner": "false"}).json()["wpa"]
+    assert d1 != d0
+
+
+def test_games_today_rejects_bad_date(monkeypatch):
+    monkeypatch.setattr(api, "get_todays_games", _no_call)
+    assert client.get("/games/today", params={"date": "2026-10-15 x"}).status_code == 422

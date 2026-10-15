@@ -193,9 +193,15 @@ def test_advice_inputs_are_citable():
 
 
 def test_get_advice_without_key(monkeypatch):
+    import strategist
+
+    def no_call(*args):
+        raise AssertionError("strategist.advise must not be called without a key")
+
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setattr(strategist, "advise", no_call)
     adv, problems, payload = a.get_advice(a.full_analysis(1, "top", 0, (0, 0, 0), 0))
-    assert adv is None and problems and "engine" in payload
+    assert adv is None and problems == ["ANTHROPIC_API_KEY is not set"] and "engine" in payload
 
 
 def test_engine_cache_one_slot_per_flag():

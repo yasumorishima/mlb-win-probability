@@ -25,7 +25,7 @@ from analysis import (
     re24_table,
     wp_after_play,
 )
-from live_feed import get_game_plays, get_live_state, get_todays_games
+from live_feed import get_game_plays, get_live_state, get_todays_games, has_live_state
 
 st.set_page_config(
     page_title="MLB Win Probability",
@@ -61,6 +61,12 @@ T = {
         "no_live_state": "Could not fetch live state. Game may not be active yet.",
         "no_games": "No games found for today.",
         "apply": "Apply to Analysis ↓",
+        "apply_none": "This game is over or not being played, so there is no state to analyse.",
+        "inning_clipped": "The live inning ({i}) is beyond the selector; analysed as inning {c}.",
+        "coach_limit": ("The bench coach has reached its limit ({n} questions per {per}). "
+                        "Try again later."),
+        "per_session": "session",
+        "per_day": "day",
         "game_state": "Game State",
         "inning": "Inning",
         "half": "Half",
@@ -145,6 +151,11 @@ T = {
         "no_live_state": "ライブ状態を取得できませんでした。試合がまだ開始されていない可能性があります。",
         "no_games": "今日の試合は見つかりませんでした。",
         "apply": "↓ 分析に反映",
+        "apply_none": "この試合は終了しているか行われていないため、分析する局面はありません。",
+        "inning_clipped": "ライブのイニング（{i}回）は選択肢の範囲外のため {c}回として分析しています。",
+        "coach_limit": "ベンチコーチの利用上限（1 {per}あたり {n} 回）に達しました。時間をおいて試してください。",
+        "per_session": "セッション",
+        "per_day": "日",
         "game_state": "ゲーム状態",
         "inning": "イニング",
         "half": "表/裏",
@@ -294,6 +305,46 @@ def li_card(li_val: float, li_lbl: str) -> str:
         f'<div style="margin-top:8px;"><span class="li-badge {li_badge(li_lbl)}">'
         f'{esc(_["li_labels"].get(li_lbl, li_lbl))}</span></div></div>'
     )
+
+
+COACH_SESSION_LIMIT = 10
+
+
+def _setting(name: str, default: str) -> str:
+    if os.environ.get(name):
+        return os.environ[name]
+    try:
+        return str(st.secrets.get(name, default))
+    except Exception:  # no secrets file
+        return default
+
+
+@st.cache_resource
+def _coach_calls_today() -> dict:
+    """Shared by every session of this server process."""
+    return {"day": None, "n": 0}
+
+
+def coach_limit_reached():
+    """None and count the call if it is allowed; otherwise (limit, period key).
+    At most COACH_SESSION_LIMIT calls per browser session and COACH_DAILY_LIMIT
+    (default 30) per UTC day for the whole server."""
+    try:
+        daily = max(0, int(_setting("COACH_DAILY_LIMIT", "30")))
+    except ValueError:
+        daily = 30
+    used = st.session_state.get("coach_calls", 0)
+    if used >= COACH_SESSION_LIMIT:
+        return COACH_SESSION_LIMIT, "per_session"
+    day = datetime.now(timezone.utc).date().isoformat()
+    box = _coach_calls_today()
+    if box["day"] != day:
+        box["day"], box["n"] = day, 0
+    if box["n"] >= daily:
+        return daily, "per_day"
+    box["n"] += 1
+    st.session_state["coach_calls"] = used + 1
+    return None
 
 
 def api_key_available() -> bool:
@@ -607,7 +658,9 @@ with st.container():
                 unsafe_allow_html=True,
             )
 
-            if st.button(_["apply"], key="apply_live", width="stretch"):
+            if not has_live_state(cached["status"]):
+                st.caption(_["apply_none"])
+            elif st.button(_["apply"], key="apply_live", width="stretch"):
                 st.session_state["_preset"] = {
                     "inning": cached["inning"],
                     "top_bottom": cached["top_bottom"],
@@ -638,6 +691,8 @@ SCHED_OPTIONS = [9, 7]
 if "_preset" in st.session_state:
     p = st.session_state.pop("_preset")
     st.session_state["w_inning"] = min(max(int(p["inning"]), 1), INNINGS[-1])
+    st.session_state["inning_clipped"] = (int(p["inning"]) if int(p["inning"]) > INNINGS[-1]
+                                         else None)
     st.session_state["half"] = p["top_bottom"]
     for k in ("w_half_EN", "w_half_JA"):
         st.session_state.pop(k, None)
@@ -698,6 +753,9 @@ with col_settings:
     extra_runner = st.checkbox(_["xr"], key="w_xr")
     if inning > sched and extra_runner:
         st.caption(_["extra_note"])
+    inning_clipped = st.session_state.get("inning_clipped")
+    if inning_clipped is not None and inning == INNINGS[-1]:
+        st.caption(_["inning_clipped"].format(i=inning_clipped, c=inning))
     clipped = st.session_state.get("diff_clipped")
     if clipped is not None and score_diff == max(-10, min(10, clipped)):
         st.caption(_["diff_clipped"].format(d=clipped, c=score_diff))
@@ -818,9 +876,14 @@ else:
     state_key = json.dumps([inning, top_bottom, outs, runners, score_diff, sched, balls, strikes,
                             extra_runner, lang])
     if st.button(_["coach_ask"], key="ask_coach"):
-        with st.spinner(_["coach_asking"]):
-            adv, problems, _payload = get_advice(result, lang)
-        st.session_state["coach"] = {"key": state_key, "advice": adv, "problems": problems}
+        limit = coach_limit_reached()
+        if limit:
+            st.warning(_["coach_limit"].format(n=limit[0], per=_[limit[1]]))
+        else:
+            with st.spinner(_["coach_asking"]):
+                adv, problems, _payload = get_advice(result, lang)
+            st.session_state["coach"] = {"key": state_key, "advice": adv,
+                                          "problems": problems}
 
     last = st.session_state.get("coach")
     if last and last["key"] == state_key:

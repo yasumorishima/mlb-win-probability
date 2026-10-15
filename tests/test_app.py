@@ -26,7 +26,10 @@ if with_key:
     import strategist
     from strategist import Advice, Citation
 
+    calls = []
+
     def fake_advise(situation, engine, players):
+        calls.append(1)
         adv = Advice(recommendation="intentional_walk", side="defense", confidence=0.55,
                      follows_engine=True, reason="<b>Walk him</b>; first base is open.",
                      departure_reason="",
@@ -83,6 +86,14 @@ if with_key:
     assert ("敬遠" if lang == "JA" else "Intentional walk") in md
     assert "&lt;b&gt;Walk him&lt;/b&gt;" in md          # model text is escaped
     assert any("made-up problem" in w.value for w in at.warning)
+    # the per-session cap stops further calls
+    n = len(calls)
+    at.session_state["coach_calls"] = 10
+    at.button(key="ask_coach").click().run()
+    assert not at.exception, at.exception
+    assert len(calls) == n
+    assert any("10" in w.value and ("上限" if lang == "JA" else "limit") in w.value
+               for w in at.warning), [w.value for w in at.warning]
 
 # postseason rules: without the automatic runner, top 10 tied differs
 at.selectbox(key="w_inning").set_value(10).run()
