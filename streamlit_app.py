@@ -10,6 +10,7 @@ coach (strategist.py) runs only when ANTHROPIC_API_KEY is configured.
 import html
 import json
 import os
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -321,14 +322,16 @@ def _setting(name: str, default: str) -> str:
 
 @st.cache_resource
 def _coach_calls_today() -> dict:
-    """Shared by every session of this server process."""
-    return {"day": None, "n": 0}
+    """Shared by every session (thread) of this server process."""
+    return {"day": None, "n": 0, "lock": threading.Lock()}
 
 
 def coach_limit_reached():
     """None and count the call if it is allowed; otherwise (limit, period key).
-    At most COACH_SESSION_LIMIT calls per browser session and COACH_DAILY_LIMIT
-    (default 30) per UTC day for the whole server."""
+    At most COACH_DAILY_LIMIT (default 30) calls per UTC day for the whole
+    server, which is the real bound; COACH_SESSION_LIMIT per browser session
+    only spreads that budget (reloading the page starts a new session).
+    A call is counted before it is made, so failed calls count too."""
     try:
         daily = max(0, int(_setting("COACH_DAILY_LIMIT", "30")))
     except ValueError:
@@ -338,11 +341,12 @@ def coach_limit_reached():
         return COACH_SESSION_LIMIT, "per_session"
     day = datetime.now(timezone.utc).date().isoformat()
     box = _coach_calls_today()
-    if box["day"] != day:
-        box["day"], box["n"] = day, 0
-    if box["n"] >= daily:
-        return daily, "per_day"
-    box["n"] += 1
+    with box["lock"]:
+        if box["day"] != day:
+            box["day"], box["n"] = day, 0
+        if box["n"] >= daily:
+            return daily, "per_day"
+        box["n"] += 1
     st.session_state["coach_calls"] = used + 1
     return None
 
@@ -753,8 +757,10 @@ with col_settings:
     extra_runner = st.checkbox(_["xr"], key="w_xr")
     if inning > sched and extra_runner:
         st.caption(_["extra_note"])
+    if inning != INNINGS[-1]:
+        st.session_state.pop("inning_clipped", None)  # the user moved away from it
     inning_clipped = st.session_state.get("inning_clipped")
-    if inning_clipped is not None and inning == INNINGS[-1]:
+    if inning_clipped is not None:
         st.caption(_["inning_clipped"].format(i=inning_clipped, c=inning))
     clipped = st.session_state.get("diff_clipped")
     if clipped is not None and score_diff == max(-10, min(10, clipped)):

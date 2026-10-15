@@ -13,9 +13,10 @@ Replaces gemini_commentary.py. Two uses:
 
 The API key is read from ANTHROPIC_API_KEY. Without it the functions
 return None and nothing is sent. The public demo has no key, so it never
-calls the API. Wherever a key is configured, each call is one request
-(at most one SDK retry, 60 s timeout); the app caps calls per session and
-per day, and the API's /wp/advice also needs ADVICE_TOKEN.
+calls the API. Wherever a key is configured, each call is exactly one
+request (no SDK retries; 60 s timeout, against 4-7 s measured for live
+advice calls on 2026-10-15); the app caps calls per day and per session,
+and the API's /wp/advice also needs ADVICE_TOKEN.
 """
 
 from __future__ import annotations
@@ -90,7 +91,7 @@ def _client():
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return None
     import anthropic
-    return anthropic.Anthropic(max_retries=1, timeout=60.0)
+    return anthropic.Anthropic(max_retries=0, timeout=60.0)
 
 
 def _schema(model: type[BaseModel]) -> dict:

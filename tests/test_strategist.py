@@ -82,4 +82,4 @@ def test_client_limits_retries_and_timeout(monkeypatch):
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
     monkeypatch.setattr(anthropic, "Anthropic", Fake)
     strategist._client()
-    assert seen == {"max_retries": 1, "timeout": 60.0}
+    assert seen == {"max_retries": 0, "timeout": 60.0}

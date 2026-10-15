@@ -4,11 +4,14 @@ MLB Win Probability API
 Win probability, Leverage Index, run expectancy and tactics from a game
 state, computed by the engine fitted to real plate-appearance transitions
 (wp_engine.py, engine_tables.json) through analysis.py. /wp/advice asks
-Claude (strategist.py) for a recommendation; it needs ANTHROPIC_API_KEY.
+Claude (strategist.py) for a recommendation; it needs ANTHROPIC_API_KEY and
+ADVICE_TOKEN, and each request must send X-Advice-Token. It has no call
+count cap, so keep the token private.
 """
 
 import hmac
 import os
+from datetime import datetime
 from enum import Enum
 
 from fastapi import FastAPI, Header, HTTPException, Query
@@ -158,14 +161,15 @@ def get_wp_advice(
     extra_runner: bool = Query(default=True, description=EXTRA_RUNNER_DOC),
     x_advice_token: str | None = Header(default=None, description="Must equal ADVICE_TOKEN"),
 ):
-    token = os.environ.get("ADVICE_TOKEN", "")
-    if not has_api_key() or not token:
+    token = os.environ.get("ADVICE_TOKEN", "").strip()
+    if not has_api_key() or not token or not token.isascii():
         raise HTTPException(
             status_code=503,
-            detail=("/wp/advice is disabled. Set ANTHROPIC_API_KEY and ADVICE_TOKEN in the "
-                    "server environment to enable it."),
+            detail=("/wp/advice is disabled. Set ANTHROPIC_API_KEY and ADVICE_TOKEN (ASCII) in "
+                    "the server environment to enable it."),
         )
-    if not x_advice_token or not hmac.compare_digest(x_advice_token.encode(), token.encode()):
+    if (not x_advice_token or not x_advice_token.isascii()
+            or not hmac.compare_digest(x_advice_token.encode(), token.encode())):
         raise HTTPException(status_code=401, detail="missing or wrong X-Advice-Token header")
     result = _analysis(inning, top_bottom, outs, runner1, runner2, runner3, score_diff,
                        scheduled_innings, balls, strikes, extra_runner)
@@ -260,6 +264,11 @@ def games_today(
     date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$",
                              description="Date in YYYY-MM-DD (default: today UTC)"),
 ):
+    if date is not None:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"not a calendar date: {date}") from None
     games = get_todays_games(date)
     return {"date": date or "today", "count": len(games), "games": games}
 

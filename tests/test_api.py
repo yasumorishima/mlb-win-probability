@@ -159,6 +159,24 @@ def test_extra_runner_parameter():
     assert d1 != d0
 
 
-def test_games_today_rejects_bad_date(monkeypatch):
+@pytest.mark.parametrize("date", ["2026-10-15 x", "2026-99-99", "2026-02-30"])
+def test_games_today_rejects_bad_date(monkeypatch, date):
     monkeypatch.setattr(api, "get_todays_games", _no_call)
-    assert client.get("/games/today", params={"date": "2026-10-15 x"}).status_code == 422
+    assert client.get("/games/today", params={"date": date}).status_code == 422
+
+
+def test_advice_token_trailing_newline_and_non_ascii(monkeypatch):
+    import strategist
+    from strategist import Advice
+
+    def fake(situation, engine, players):
+        return Advice(recommendation="none", side="offense", confidence=0.5, follows_engine=True,
+                      reason="ok", departure_reason="", cited=[]), []
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    monkeypatch.setattr(strategist, "advise", fake)
+    q = dict(inning=8, top_bottom="bottom", outs=0, runner1=1)
+    monkeypatch.setenv("ADVICE_TOKEN", "tok\n")       # as read from an env file
+    assert client.get("/wp/advice", params=q, headers={"X-Advice-Token": "tok"}).status_code == 200
+    monkeypatch.setenv("ADVICE_TOKEN", "tök")
+    assert client.get("/wp/advice", params=q, headers={"X-Advice-Token": "tok"}).status_code == 503
