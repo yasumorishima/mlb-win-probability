@@ -55,5 +55,8 @@ for a in ("ENGINE", "RECAL", "TEAM"):
 for a, b in (("RECAL", "ENGINE"), ("TEAM", "ENGINE")):
     show(f"band |gap {a}|-|gap {b}|", abs(gap(a, one)) - abs(gap(b, one)),
          np.array([abs(gap(a, w)) - abs(gap(b, w)) for w in W]))
+for a in ("RECAL", "TEAM"):
+    show(f"band mean {a}-ENGINE", gap(a, one) - gap("ENGINE", one),
+         np.array([gap(a, w) - gap("ENGINE", w) for w in W]))
 show("band mean TEAM-RECAL", gap("TEAM", one) - gap("RECAL", one),
      np.array([gap("TEAM", w) - gap("RECAL", w) for w in W]))

@@ -2,9 +2,10 @@
 
 The study was pre-registered in [`PREREG.md`](PREREG.md) (frozen in commit
 `0cc376d` before the run). `run_2026.py` was run on 2026-10-16 at 01:20 JST
-and finished without a restart. This is the only run of the frozen script. An
+and finished without a restart. This is the only run of the frozen script on
+2026 (the frozen script was also run with `--dry` on the training seasons). An
 earlier, unfrozen version had been run on 2026 by mistake on 2026-10-15 and
-its output was deleted unread; [`PREREG.md`](PREREG.md) discloses it. Its output is in [`published/`](published/):
+its output was deleted unread; [`PREREG.md`](PREREG.md) discloses it. The output of the frozen run is in [`published/`](published/):
 `results_2026.json` (every number below), `pred_2026.parquet` (each arm's
 prediction for every plate appearance) and `run_2026.log`. The input hashes
 it recorded match `FROZEN_MD5`.
@@ -63,8 +64,8 @@ apart from zero once team strength is in.
 ## The 0.3–0.5 band (H3, reported with its interval, no verdict)
 
 On the plate appearances where the engine says 0.3 ≤ p < 0.5, the engine's
-mean prediction is 3.3 points above the observed home win rate. RECAL brings
-the gap down to 1.3 points and TEAM to 1.4 points. The difference
+mean prediction is 3.3 points above the observed home win rate. RECAL's mean
+prediction there is 1.3 points above it and TEAM's 1.4 points. The difference
 |gap TEAM| − |gap ENGINE| is −0.019 (−0.021 to +0.006).
 
 | rows where the engine says 0.3–0.5 (28,814) | mean prediction | gap to observed 0.3705 |
@@ -74,9 +75,12 @@ the gap down to 1.3 points and TEAM to 1.4 points. The difference
 | TEAM | 0.3843 | +0.0137 |
 
 The band's observed rate is itself uncertain (ENGINE's gap +0.033, 95%
-interval +0.005 to +0.059 in `check_independent.log`). How much of the gap
-recalibration closes cannot be told from one season: |gap RECAL| − |gap
-ENGINE| is −0.020 (−0.020 to +0.010). What is tight is that team strength
+interval +0.005 to +0.059 in `check_independent.log`). Recalibration lowers
+the band's mean prediction by a tight amount, −0.0199 (−0.0200 to −0.0198),
+but how much of the gap that closes depends on the observed rate and cannot
+be told from one season (|gap RECAL| − |gap ENGINE| is −0.020; its lower end
+is bounded by the shift itself and its upper end is +0.010). What is tight is
+that team strength
 does not move the band beyond what recalibration does: TEAM − RECAL in the
 band's mean prediction is +0.001 (−0.0016 to +0.0036). So this study does not
 show that team strength is what makes the engine too high in the band. The
