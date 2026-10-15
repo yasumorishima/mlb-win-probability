@@ -31,6 +31,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import http.client
 import json
 import sys
 import time
@@ -45,6 +46,8 @@ BASE = "https://statsapi.mlb.com/api"
 UA = {"User-Agent": "mlb-win-probability/2.0 (github.com/yasumorishima/mlb-win-probability)"}
 
 STEAL_TYPES = ("stolen_base_", "caught_stealing_", "pickoff_caught_stealing_")
+NON_PA_PREFIXES = ("caught_stealing", "pickoff", "stolen_base", "runner_double_play",
+                   "other_out", "wild_pitch", "passed_ball", "balk", "defensive_indiff")
 
 
 class StateError(Exception):
@@ -58,7 +61,8 @@ def fetch_json(url: str, retries: int = 4) -> dict:
             req = urllib.request.Request(url, headers=UA)
             with urllib.request.urlopen(req, timeout=60) as resp:
                 return json.loads(resp.read().decode())
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as e:
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError,
+                http.client.HTTPException, ConnectionError, OSError) as e:
             last = e
             time.sleep(2 ** attempt)
     raise RuntimeError(f"fetch failed after {retries} tries: {url}: {last}")
@@ -66,12 +70,16 @@ def fetch_json(url: str, retries: int = 4) -> dict:
 
 def season_games(season: int, until: str | None = None) -> list[dict]:
     """Final regular-season games of a season (schedule endpoint)."""
-    end = until or f"{season}-11-30"
+    end = f"{season}-11-30"
+    if until and until[:4] == str(season):
+        end = until          # --until applies only to its own season
     url = (f"{BASE}/v1/schedule?sportId=1&gameType=R&startDate={season}-03-01"
            f"&endDate={end}")
     games = []
     for d in fetch_json(url).get("dates", []):
         for g in d["games"]:
+            if str(g.get("season")) != str(season):
+                continue  # the schedule endpoint can return other seasons
             if g.get("status", {}).get("codedGameState") != "F":
                 continue  # final only (drops postponed / suspended-not-finished)
             games.append({"game_pk": g["gamePk"], "date": d["date"]})
@@ -169,25 +177,32 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
                    pitcher=play["matchup"]["pitcher"]["id"],
                    home_won=home_won)
 
-        # Walk the events of this PA in order.
-        # The feed records a steal / caught stealing as a non-pitch "action"
-        # placed right AFTER the pitch it happened on, carrying the count
-        # after that pitch. So for a steal on a pitch, the state the runner
-        # and the defense faced is the one in force before the preceding
-        # pitch: `at_pitch` keeps that snapshot. Pickoffs and step-offs are
-        # not on a pitch and use the current state.
-        disengage = 0                       # pickoff attempts + step-offs so far
-        count = {"balls": 0, "strikes": 0}  # count now
-        ev_outs = outs                      # outs now
-        at_pitch = None                     # state before the most recent pitch
-        for e in play.get("playEvents", []):
+        # Pass 1 over the PA's events: the state in force BEFORE each event.
+        # The count and outs on an event are the values after it, so the
+        # state before event k is the one after event k-1.
+        events = play.get("playEvents", [])
+        pos_of = {e.get("index"): k for k, e in enumerate(events)}
+        # runner advances (not the batter, not outs) reset the 2023
+        # disengagement counter; collect the event positions where they happen
+        advance_at = set()
+        for r in play.get("runners", []):
+            mv = r.get("movement", {})
+            if mv.get("start") and mv.get("end") and not mv.get("isOut") \
+                    and mv.get("start") != mv.get("end"):
+                k = pos_of.get(r["details"].get("playIndex"))
+                if k is not None:
+                    advance_at.add(k)
+        before = []                              # state before event k
+        count = {"balls": 0, "strikes": 0}
+        ev_outs = outs
+        disengage = 0
+        last_pitch = None                        # position of latest pitch so far
+        for k, e in enumerate(events):
             det = e.get("details", {}) or {}
-            et = det.get("eventType") or ""
-            etype = e.get("type")
+            before.append(dict(balls=count["balls"], strikes=count["strikes"],
+                               outs=ev_outs, disengagements=disengage,
+                               last_pitch=last_pitch, catcher=catcher.get(fielding)))
             if e.get("isPitch"):
-                at_pitch = dict(balls=count["balls"], strikes=count["strikes"],
-                                outs=ev_outs, disengagements=disengage,
-                                pitch_number=e.get("pitchNumber"))
                 pitch_rows.append(dict(
                     game_pk=game_pk, season=season, at_bat_index=ab["atBatIndex"],
                     pitch_number=e.get("pitchNumber"),
@@ -195,60 +210,103 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
                     code=(det.get("call") or {}).get("code"),
                     is_in_play=bool(det.get("isInPlay")),
                 ))
-                count = {"balls": e["count"]["balls"], "strikes": e["count"]["strikes"]}
-                continue
+                last_pitch = k
             pos = (e.get("position") or {}).get("abbreviation")
-            if pos == "C" and e.get("player") and etype == "action":
+            if pos == "C" and e.get("player") and e.get("type") == "action":
                 catcher[fielding] = e["player"]["id"]
-
-            is_attempt = etype in ("pickoff", "stepoff")
-            is_runner_event = et.startswith(STEAL_TYPES) or et.startswith("pickoff_")
-            if is_attempt or is_runner_event:
-                on_pitch = et.startswith(("stolen_base_", "caught_stealing_"))
-                snap = at_pitch if (on_pitch and at_pitch) else dict(
-                    balls=count["balls"], strikes=count["strikes"], outs=ev_outs,
-                    disengagements=disengage, pitch_number=None)
-                if et:
-                    kind = et  # pickoff out / error / steal outcome
-                elif etype == "stepoff":
-                    kind = "stepoff"
-                else:
-                    kind = f"pickoff_attempt_{det.get('code')}"
+            # pickoff attempts by the pitcher and step-offs are disengagements;
+            # a throw from the catcher is not
+            if e.get("type") == "stepoff" or (e.get("type") == "pickoff" and not det.get("fromCatcher")):
+                disengage += 1
                 run_rows.append(dict(
                     game_pk=game_pk, date=date, season=season,
                     at_bat_index=ab["atBatIndex"], event_index=e.get("index"),
-                    event_type=kind, runner=(e.get("player") or {}).get("id"),
-                    inning=inning, half=half, outs_before=snap["outs"],
-                    balls=snap["balls"], strikes=snap["strikes"],
-                    disengagements_before=snap["disengagements"],
-                    on_pitch=bool(on_pitch and at_pitch),
-                    pitch_number=snap["pitch_number"],
+                    row_kind="attempt",
+                    event_type="stepoff" if e.get("type") == "stepoff" else f"pickoff_attempt_{det.get('code')}",
+                    runner=None, inning=inning, half=half,
+                    outs_before=before[k]["outs"], balls=before[k]["balls"],
+                    strikes=before[k]["strikes"],
+                    disengagements_before=before[k]["disengagements"],
+                    on_pitch=False, pitch_number=None,
                     pitcher=play["matchup"]["pitcher"]["id"],
+                    pitch_hand=(play["matchup"].get("pitchHand") or {}).get("code"),
                     batter=play["matchup"]["batter"]["id"],
-                    catcher=catcher.get(fielding),
-                    # score at the start of the PA (runs that scored earlier in
-                    # the same PA on a wild pitch etc. are not reflected)
+                    catcher=before[k]["catcher"],
                     home_score=home_score, away_score=away_score,
                     is_out=bool(det.get("isOut")),
-                    description=det.get("description"),
-                ))
-                if is_attempt:
-                    disengage += 1
-            if det.get("isOut") and "count" in e:
+                    description=det.get("description")))
+            if k in advance_at:
+                disengage = 0
+            if "count" in e:
+                count = {"balls": e["count"]["balls"], "strikes": e["count"]["strikes"]}
                 ev_outs = min(e["count"].get("outs", ev_outs), 3)
-        last_count = count
+        if last_pitch is not None:
+            last_count = {"balls": events[last_pitch]["count"]["balls"],
+                          "strikes": events[last_pitch]["count"]["strikes"]}
+        else:
+            last_count = {"balls": 0, "strikes": 0}
+
+        # Pass 2: runner outcomes come from runners[] (authoritative). In the
+        # event list an inning-ending caught stealing is an empty "no_pitch"
+        # and a steal on the pitch that ends the PA has no event of its own.
+        # A steal or caught stealing happens on a pitch: the pitch at
+        # playIndex if that event is a pitch, else the latest earlier pitch.
+        # Pickoff outcomes happen between pitches: state before the event.
+        seen = set()
+        for r in play.get("runners", []):
+            rd = r.get("details", {})
+            et = rd.get("eventType") or ""
+            if not (et.startswith(STEAL_TYPES) or et.startswith("pickoff_")):
+                continue
+            key = ((rd.get("runner") or {}).get("id"), rd.get("playIndex"), et)
+            if key in seen:
+                continue
+            seen.add(key)
+            k = pos_of.get(rd.get("playIndex"))
+            if k is None:
+                raise StateError(f"{game_pk}: runner event {et} points to a missing playIndex")
+            on_pitch = et.startswith(("stolen_base_", "caught_stealing_"))
+            pk_ = None
+            if on_pitch:
+                pk_ = k if events[k].get("isPitch") else before[k]["last_pitch"]
+            snap = before[pk_] if pk_ is not None else before[k]
+            run_rows.append(dict(
+                game_pk=game_pk, date=date, season=season,
+                at_bat_index=ab["atBatIndex"], event_index=rd.get("playIndex"),
+                row_kind="outcome", event_type=et,
+                runner=key[0], inning=inning, half=half,
+                outs_before=snap["outs"], balls=snap["balls"], strikes=snap["strikes"],
+                disengagements_before=snap["disengagements"],
+                on_pitch=pk_ is not None,
+                pitch_number=events[pk_].get("pitchNumber") if pk_ is not None else None,
+                pitcher=play["matchup"]["pitcher"]["id"],
+                pitch_hand=(play["matchup"].get("pitchHand") or {}).get("code"),
+                batter=play["matchup"]["batter"]["id"],
+                catcher=snap["catcher"],
+                # score at the start of the PA (runs that scored earlier in
+                # the same PA on a wild pitch etc. are not reflected)
+                home_score=home_score, away_score=away_score,
+                is_out=bool(r.get("movement", {}).get("isOut")),
+                description=(events[k].get("details") or {}).get("description")))
 
         res = play.get("result", {})
         outs_after = play["count"]["outs"]
         new_home = res.get("homeScore", home_score)
         new_away = res.get("awayScore", away_score)
+        post = _bases_after(play)
+        desc = (res.get("description") or "").lower()
         pa_rows.append(dict(pre, event_type=res.get("eventType"),
                             outs_after=outs_after,
+                            post_1b=post[0], post_2b=post[1], post_3b=post[2],
                             runs_on_play=(new_home - home_score) + (new_away - away_score),
-                            final_balls=last_count["balls"], final_strikes=last_count["strikes"]))
+                            final_balls=last_count["balls"], final_strikes=last_count["strikes"],
+                            is_bunt=("bunt" in desc),
+                            # False when the half ended on a baserunning out
+                            # and the batter's plate appearance did not finish
+                            pa_complete=not (res.get("eventType") or "").startswith(NON_PA_PREFIXES)))
         home_score, away_score = new_home, new_away
         outs = outs_after
-        bases = _bases_after(play)
+        bases = post
 
     if (home_score, away_score) != (final_home, final_away):
         raise StateError(f"{game_pk}: replayed score {home_score}-{away_score} "
@@ -284,11 +342,14 @@ def _check_catchers(run_rows: list[dict], plays: list, game_pk: int) -> None:
                 for c in r.get("credits", []):
                     if c["position"]["abbreviation"] == "C":
                         credited[(p["atBatIndex"], r["details"].get("playIndex"))] = c["player"]["id"]
-    for row in run_rows:
-        if row["event_type"].startswith("caught_stealing_"):
-            key = (row["at_bat_index"], row["event_index"])
-            if key in credited and credited[key] != row["catcher"]:
-                raise StateError(f"{game_pk}: tracked catcher {row['catcher']} != credited {credited[key]}")
+    rows = {(row["at_bat_index"], row["event_index"]): row for row in run_rows
+            if row["event_type"].startswith("caught_stealing_")}
+    missing = set(credited) - set(rows)
+    if missing:
+        raise StateError(f"{game_pk}: caught stealing credited but not extracted: {sorted(missing)}")
+    for key, cid in credited.items():
+        if rows[key]["catcher"] != cid:
+            raise StateError(f"{game_pk}: tracked catcher {rows[key]['catcher']} != credited {cid}")
 
 
 def build_season(season: int, out: Path, until: str | None, workers: int,
