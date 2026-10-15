@@ -3,8 +3,8 @@
 Pre-registration: `PREREG.md` (frozen in `48e69cf`, md5 `c040ba74`, no
 amendments). The analysis is `analyze.py` exactly as frozen, run once on
 2026-10-15 after all batches came back. Outcomes from 2026-07 on were not
-looked at before that run. Every number below is in `results/results.json`
-and `results/analyze.log`; the headline log losses were recomputed from the
+looked at before that run. Every number below is in `published/results.json`
+and `published/analyze.log`; the headline log losses were recomputed from the
 raw outputs with separate code and agree to five digits.
 
 ## Verdict
@@ -77,8 +77,8 @@ test set.
 
 ## Files
 
-- `results/results.json`: everything `analyze.py` writes.
-- `results/analyze.log`: its printed summary.
-- `results/raw/*.jsonl.gz`: every Claude answer (B and C on test and control,
+- `published/results.json`: everything `analyze.py` writes.
+- `published/analyze.log`: its printed summary.
+- `published/raw/*.jsonl.gz`: every Claude answer (B and C on test and control,
   the 100 repeats and the 40-call pilot), with model, stop reason and token
   usage.
