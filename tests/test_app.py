@@ -91,6 +91,9 @@ assert at.checkbox(key="w_r1").value and at.checkbox(key="w_r2").value
 assert at.slider(key="w_diff").value == -1
 md = " ".join(m.value for m in at.markdown)
 assert ("送りバント" if lang == "JA" else "Sacrifice bunt") in md
+# the tactic notes follow the language
+assert ("ファウルになったバント" if lang == "JA" else "bunts fouled off") in md
+assert ("bunts fouled off" if lang == "JA" else "ファウルになったバント") not in md
 
 # the preset values survive another interaction (widgets keep them)
 at.selectbox(key="w_balls").set_value(3).run()
@@ -120,6 +123,23 @@ if with_key:
     assert len(calls) == n
     assert any("10" in w.value and ("上限" if lang == "JA" else "limit") in w.value
                for w in at.warning), [w.value for w in at.warning]
+
+# a steal no rate can pay for: the card says so once, and the note keeps its other parts
+at.selectbox(key="w_inning").set_value(9).run()
+at.selectbox(key="w_half_" + lang).set_value("bottom").run()
+at.selectbox(key="w_outs").set_value(2).run()
+at.checkbox(key="w_r1").uncheck().run()
+at.checkbox(key="w_r2").check().run()
+at.checkbox(key="w_r3").uncheck().run()
+at.slider(key="w_diff").set_value(-3).run()
+at.selectbox(key="w_strikes").set_value(0).run()
+at.selectbox(key="w_balls").set_value(0).run()
+assert not at.exception, at.exception
+md = " ".join(m.value for m in at.markdown)
+no_pay = (("どの成功率でもこの盗塁は得になりません", "割に合いません") if lang == "JA" else
+          ("No success rate makes this steal pay off", "no success rate makes this steal pay off"))
+assert md.count(no_pay[0]) == 1 and no_pay[1] not in md, md[-600:]
+assert ("牽制や暴投" if lang == "JA" else "pickoff and wild-pitch") in md
 
 # postseason rules: without the automatic runner, top 10 tied differs
 at.selectbox(key="w_inning").set_value(10).run()
