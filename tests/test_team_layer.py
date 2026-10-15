@@ -65,6 +65,8 @@ GAMES = [
     _game(6, "2026-04-05", 1, 3, 6, 1),
     _game(7, "2026-04-09", 4, 2, 5, 3),
     _game(8, "2026-04-10", 1, 2, 10, 0),                    # the game's own date
+    _game(9, "2020-08-01", 1, 2, 3, 1),                     # seasons before the fit
+    _game(10, "2021-04-05", 1, 2, 2, 1),
 ]
 
 
@@ -139,6 +141,18 @@ def test_current_season_is_read_again_after_an_hour(monkeypatch):
     tl._games_cached(2025, "2025-12-31", now_year=2026)
     assert len(calls) == 3                                    # only the current season again
     assert all("fields=" in c for c in calls)
+
+
+def test_failed_reread_keeps_the_old_entry(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tl, "_fetch", fake_fetch(calls))
+    old = tl._games_cached(2026, "2026-04-09", now_year=2026)
+    monkeypatch.setattr(tl, "CURRENT_TTL", -1)
+    monkeypatch.setattr(tl, "_fetch", lambda url: calls.append(url))     # every read fails
+    assert tl._games_cached(2026, "2026-04-09", now_year=2026) == old
+    n = len(calls)
+    assert tl._games_cached(2026, "2026-04-09", now_year=2026) == old   # waiting: no read
+    assert len(calls) == n
 
 
 def test_unexpected_shape_gives_none(monkeypatch):

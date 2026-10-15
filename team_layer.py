@@ -113,7 +113,8 @@ def _games_cached(season: int, end: str, now_year: int | None = None) -> list[di
     """season_games, cached per (season, end). A finished season is kept; the
     current season is read again after CURRENT_TTL (a suspended game can turn
     final during the day). A failed read is not kept, but the next try waits
-    RETRY_AFTER so a live page does not block on every refresh during an outage."""
+    RETRY_AFTER so a live page does not block on every refresh during an outage;
+    while a re-read of an expired entry fails, the old entry is used."""
     key = (season, end)
     now = time.time()
     current = season >= (now_year or _date.today().year)
@@ -122,12 +123,15 @@ def _games_cached(season: int, end: str, now_year: int | None = None) -> list[di
         if hit is not None and not (current and now - hit[0] > CURRENT_TTL):
             return hit[1]
         if now - _FAILED.get(key, -1e18) < RETRY_AFTER:
-            return None
+            return hit[1] if hit is not None else None
     g = season_games(season, end)
     with _LOCK:
         if g is None:
+            _FAILED.pop(key, None)
+            while len(_FAILED) >= _CACHE_MAX:
+                _FAILED.pop(next(iter(_FAILED)))
             _FAILED[key] = now
-            return None
+            return hit[1] if hit is not None else None
         _FAILED.pop(key, None)
         _CACHE.pop(key, None)
         while len(_CACHE) >= _CACHE_MAX:

@@ -227,6 +227,13 @@ assert not at.exception, at.exception
 cap = [c.value for c in at.caption]
 assert not any(TEAM_WORD in c for c in cap), cap
 assert any(("regular-season" if lang == "EN" else "レギュラーシーズン") in c for c in cap), cap
+# before the first pitch there is no line at all
+LIVE.update({"status": "Pre-Game", "game_type": "R"})
+at.button(key="load_live").click().run()
+assert not at.exception, at.exception
+cap = [c.value for c in at.caption]
+assert not any(TEAM_WORD in c or ("regular-season" if lang == "EN" else "レギュラーシーズン") in c
+               for c in cap), cap
 
 # replay mode renders without network until a button is pressed
 at.sidebar.radio[1].set_value("🎬 Replay Mode").run()
