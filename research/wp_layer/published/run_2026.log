@@ -1,0 +1,10 @@
+ENGINE  brier 0.15845 logloss 0.47138 gap35(eng band) +0.0326
+RECAL   brier 0.15831 logloss 0.47115 gap35(eng band) +0.0127
+TEAM    brier 0.15680 logloss 0.46743 gap35(eng band) +0.0137
+SP      brier 0.15785 logloss 0.47006 gap35(eng band) +0.0129
+INGAME  brier 0.15830 logloss 0.47112 gap35(eng band) +0.0112
+FULL    brier 0.15666 logloss 0.46710 gap35(eng band) +0.0121
+H1_TEAM_minus_RECAL_brier -0.00151 [-0.00253, -0.00049] p 0.0035 SUPPORTED
+H2_TEAM_minus_ENGINE_brier -0.00165 [-0.0027, -0.0006] p 0.003 SUPPORTED
+H3_absgapTEAM_minus_absgapENGINE -0.01892 [-0.02138, 0.00643] p 0.042 (reported only)
+exit=0
