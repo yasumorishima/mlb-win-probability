@@ -1,0 +1,5 @@
+K=10: RECAL 0.15703 TEAM 0.15515  TEAM-RECAL by phase (late, mid, early): [-0.00025 -0.00123 -0.00387]
+coef (raw units) {'L': np.float64(1.0812), 'Lr': np.float64(-0.034), 'Lr2': np.float64(0.0365), 'r': np.float64(-0.0445), 'r2': np.float64(0.0232), 'dprev_r': np.float64(0.2352), 'dprev_r2': np.float64(-0.1468), 'dcur_r': np.float64(0.5229), 'dcur_r2': np.float64(-0.271)}
+K=30: RECAL 0.15703 TEAM 0.15513  TEAM-RECAL by phase (late, mid, early): [-0.00026 -0.00124 -0.00392]
+K=60: RECAL 0.15703 TEAM 0.15514  TEAM-RECAL by phase (late, mid, early): [-0.00026 -0.00123 -0.00389]
+K=120: RECAL 0.15703 TEAM 0.15516  TEAM-RECAL by phase (late, mid, early): [-0.00026 -0.00122 -0.00385]
