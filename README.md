@@ -1,25 +1,78 @@
 # MLB Win Probability Engine
 
-イニング・アウト・走者・点差を入力すると、**ホーム勝率・局面の重要度・戦術提案**をリアルタイムで返すエンジン。
+イニング・アウト・走者・点差（とカウント）から、**ホームの勝利確率・局面の重要度（Leverage Index）・作戦ごとの勝率の増減**を返すエンジンと、その数字を読んで次の 1 球の前に作戦を提案する **Claude ベンチコーチ**。
 
-**[Live Demo](https://mlb-wp-engine.streamlit.app/)** | English / 日本語
+**[Live Demo](https://mlb-wp-engine.streamlit.app/)**（English / 日本語）
 
----
-
-公開して動いているのは **Streamlit デモ**だけで、FastAPI は手元で起動して使うもの（公開サーバーは無い）。新規モデル学習ワークフローは本リポに含まれない。
+公開して動いているのは Streamlit デモだけです。FastAPI は手元で起動して使います。デモには API キーを置いていないので、デモからは Claude を呼びません。
 
 ---
 
-## Features
+## エンジン
 
-- **Win Probability**: Home team win probability given inning, outs, runners, score
-- **Leverage Index**: How critical the current plate appearance is (1.0 = average, 4.0+ = critical)
-- **WPA (Win Probability Added)**: WP change from a single play
-- **Live Feed**: Real-time game state + pitch/hit data via MLB Stats API (auto-refresh every 30s)
-- **Preset Scenarios**: 6 pre-built game situations for quick analysis
-- **Bilingual UI**: English / Japanese toggle
+MLB Stats API の play-by-play から作った打席ごとの遷移（2021〜2025 年・915,418 打席）に当てはめた、リーグ平均のマルコフモデルです（`wp_engine.py`、表は `engine_tables.json`）。
 
-## Quick Start
+1. レギュラーシーズンの打席で、塁・アウトの状態ごとに「次の状態とその打席の得点」の分布を、表（ビジター攻撃）と裏（ホーム攻撃）で別に数える
+2. そこから、半イニングの残りで何点入るかの分布を動的計画法で出す
+3. 半イニングを再帰でたどって試合の勝率を出す（サヨナラ、延長の二塁走者〈2020 年以降のレギュラーシーズン。ポストシーズンは無し〉）
+4. カウントの層：打席の結果の種類はカウントで変わり、種類ごとの遷移は変わらないとして、カウント別の勝率を出す（0-0 ではカウント無しの勝率と一致）
+
+作戦は得点期待値でなく**勝率**で測ります。
+
+| 作戦 | 出す数字 |
+|---|---|
+| 盗塁（二塁・三塁） | 損益分岐の成功率 |
+| 送りバント | その状態で実際に起きたバントの結果の平均をとった勝率と、その増減 |
+| 敬遠 | 打者を一塁に置いた後の勝率と、その増減（守備側から見る） |
+
+### 2026 年（学習に使っていない年）での確認
+
+| | Brier | log loss |
+|---|---|---|
+| このエンジン | 0.15845 | 0.47138 |
+| 旧エンジン（手で合わせた正規近似） | 0.15970 | 0.47733 |
+| ホーム勝率の定数 | 0.24976 | 0.69266 |
+
+2026 年の 184,327 打席それぞれについて、打席前の勝率をその試合の勝敗で採点しました。7 回以降で 2 点差以内に限ると、旧エンジンとの Brier の差は −0.0045（試合単位のブートストラップで 95% 区間 −0.0073〜−0.0017）です。勝率帯ごとの数字は `reports/engine_check_2026.json` にあります。
+
+**分かっている弱点**：勝率 0.3〜0.5 の帯で、どのシーズンも約 3 ポイント高めに出ます。全員をリーグ平均として扱うので、同じ試合の中でチームの強さが続くこと（序盤に点を取るチームは終盤も取る）を織り込んでいないためと考えています。
+
+## データ
+
+`scripts/build_states.py` が MLB Stats API から打席・走者・投球の表を作ります（GitHub Actions の `build-states.yml` を手動で実行し、Release `states-v1` に出力）。各試合で次を確かめ、どれかが合わない試合は捨てます。
+
+- スコアを打席ごとに積み上げると最終スコアに一致する
+- 各半イニングが 0 アウトで始まり、途中でアウト数が減らない
+- 延長の二塁走者がルールどおり置かれている
+- 盗塁と盗塁死の数がボックススコアと一致する
+
+捨てた試合が 1% を超えたシーズンや、盗塁を投球に割り当てられた割合・捕手の記録が合わないシーズンは書き出しません。2021〜2026 年のレギュラーシーズンの全試合で、捨てた試合は 0 です。表を当てはめ直すときは `scripts/fit_engine.py` を使います。
+
+## Claude ベンチコーチ
+
+`strategist.py` が、局面とエンジンの数字（作戦ごとの損益分岐や勝率の増減）を Claude（`claude-opus-5-5`。混雑時はサーバー側のフォールバックで別のモデルが答えることがあります）に渡し、推奨する作戦・理由・使った数字を構造化出力で受け取ります。**Claude が「使った数字」として返した値と、理由の中の % の数字を、渡した数字と突き合わせ**、合わないものは画面と API の応答に出します。
+
+- キー：環境変数 `ANTHROPIC_API_KEY`（または Streamlit secrets）。無ければ何も送りません
+- 1 回の問い合わせは 1 リクエストです（SDK の再試行なし・60 秒で打ち切り。2026-10-15 の実測は 1 回 4〜7 秒）
+- アプリでの上限は、サーバー全体で 1 日（UTC）`COACH_DAILY_LIMIT` 回（既定 30）と、1 セッション 10 回です（失敗した問い合わせも数えます）
+- API の `/wp/advice` は `ADVICE_TOKEN` も必要です。リクエストに同じ値の `X-Advice-Token` ヘッダーが無ければ断ります（回数の上限は無いので、トークンは人に渡さないでください）
+
+### 盗塁の成功を、統計モデルより当てられるか
+
+Claude 自身の予測が役に立つかを、事前登録して確かめました（`research/steal_claude/`）。2026 年 7〜9 月の盗塁 1,843 件で比べた結果、**Claude 単独（log loss 0.4668）は統計モデル（0.4636）より悪く、モデルの予測値を渡した場合（0.4624）は数字の上ではわずかに良いものの、差 −0.0012（95% 区間 −0.0038〜+0.0013）で改善とは言えません**。事前登録した 2 つの仮説はどちらも支持されませんでした。詳細と Claude の全回答は [`research/steal_claude/RESULTS.md`](research/steal_claude/RESULTS.md) にあります。ベンチコーチは、エンジンの数字を言葉にして作戦をまとめる役として使っています。
+
+## 使い方
+
+### Streamlit
+
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
+
+- 局面を入力するか、プリセット（9 回裏の満塁など 6 つ）を選ぶと、勝率・LI・作戦・次の打席の結果ごとの勝率が出ます
+- **Live Games**：その日の試合を MLB Stats API から読み、進行中の局面をそのまま入力に反映できます（30 秒ごとの自動更新あり。終わった試合は反映しません）
+- **Replay Mode**：過去の試合を 1 プレーずつ（自動再生もできます）たどり、各プレーの前後の勝率と WPA を見られます
 
 ### FastAPI
 
@@ -29,75 +82,51 @@ uvicorn api:app --reload
 # → http://localhost:8000/docs
 ```
 
-### Docker
+Docker なら `docker compose up --build` で `http://localhost:8001/docs` です（ホストの `ANTHROPIC_API_KEY` と `ADVICE_TOKEN` を渡します）。
 
-```bash
-docker compose up --build
-# → http://localhost:8001/docs
-```
-
-### Streamlit Dashboard
-
-```bash
-streamlit run streamlit_app.py
-```
-
-## API Endpoints
-
-### `GET /wp` — Win Probability + LI + Tactics
-
-```bash
-# 9th inning, bottom, 2 outs, bases loaded, tie game
-curl "http://localhost:8000/wp?inning=9&top_bottom=bottom&outs=2&runner1=1&runner2=1&runner3=1&score_diff=0"
-```
-
-### `GET /wp/play` — WPA for a Single Play
-
-```bash
-# Before: Bot 9, 1 out, runner on 2nd, tie → After: Bot 9, 1 out, runners 1st & 3rd, tie
-curl "http://localhost:8000/wp/play?before_inning=9&before_top_bottom=bottom&before_outs=1&before_runner2=1&before_score_diff=0&after_inning=9&after_top_bottom=bottom&after_outs=1&after_runner1=1&after_runner3=1&after_score_diff=0"
-```
-
-### `GET /re24` — RE24 Table
-
-```bash
-curl "http://localhost:8000/re24"
-
-```
-
-### `GET /wp/scenario` — Preset Scenarios
-
-```bash
-curl "http://localhost:8000/wp/scenario?name=ninth_inning_drama"
-curl "http://localhost:8000/wp/scenario?name=walkoff_chance"
-```
-
-Available scenarios: `ninth_inning_drama`, `game_start`, `rally_7th`, `tied_8th`, `walkoff_chance`, `comfortable_lead`
-
-## Technical Background
-
-### Leverage Index
-
-| LI Range | Label | Meaning |
-|----------|-------|---------|
-| < 0.5 | Low | Routine situation |
-| 0.5–1.5 | Medium | Average importance |
-| 1.5–3.0 | High | Key moment |
-| 3.0+ | Very High | Game-defining |
-
-### FastAPI（ローカル / RPi5）
-
-| 項目 | 値 |
+| エンドポイント | 内容 |
 |---|---|
-| Swagger UI | ローカル起動: `http://localhost:8001/docs` |
-| メモリ | 256Mi |
+| `GET /wp` | 勝率・打撃側の勝率・LI・残りの得点期待値・次の打席の結果ごとの勝率・作戦 |
+| `GET /wp/play` | 1 プレーの前後の状態から WPA（`after_outs=3` は攻守交代） |
+| `GET /wp/advice` | 上と同じ分析に Claude の推奨を付けたもの（キーとトークンが必要） |
+| `GET /re24` | 24 の塁・アウト状態の得点期待値と、1 点以上入る確率 |
+| `GET /wp/scenario` | プリセットの局面 |
+| `GET /games/today` | その日の試合一覧（`date=YYYY-MM-DD`） |
+| `GET /wp/live/{gamePk}` | 試合の現在の局面と勝率 |
 
-## Roadmap
+`/wp`・`/wp/play`・`/wp/advice` は `extra_runner=false` で延長の二塁走者なし（ポストシーズンと 2019 年以前）として計算します。7 イニングの試合は `scheduled_innings=7` を渡します。カウントは `balls` と `strikes` を両方渡したときだけ使います。
 
-### Phase 1: 基盤構築 ✅
-- [x] WP エンジン v1（Markov Chain + Normal 近似 + Optuna 5 パラメータ最適化）
-- [x] FastAPI + Streamlit ダッシュボード（バイリンガル、ライブフィード、What-If）
+```bash
+# 9 回裏 2 死満塁 同点
+curl "http://localhost:8000/wp?inning=9&top_bottom=bottom&outs=2&runner1=1&runner2=1&runner3=1&score_diff=0"
+
+# Claude の推奨（8 回裏 無死一塁 1 点ビハインド）
+curl -H "X-Advice-Token: $ADVICE_TOKEN" \
+  "http://localhost:8000/wp/advice?inning=8&top_bottom=bottom&outs=0&runner1=1&score_diff=-1&lang=JA"
+```
+
+### Leverage Index の目安
+
+| LI | 表示 |
+|---|---|
+| 0.5 未満 | Low |
+| 0.5〜1.5 | Medium |
+| 1.5〜3.0 | High |
+| 3.0 以上 | Very High |
+
+## 旧版からの変更（2026-10）
+
+- 以前の学習データ（Hugging Face `mlb_wp/play_states`）は、アウト数が全行 0、走者なしが 77% で使えないと分かったため、データを作り直し、エンジンも置き換えました。旧エンジン（v1/v2・LightGBM・ベイズ）と、それに基づく検証値は削除しました（比較用に `scripts/old_engine.py` だけ残しています。アプリと API は使いません）
+- 解説は Gemini から Claude に替えました。`/wp/commentary` と `/commentary/info` は無くなり、`/wp/advice` に替わっています
+- `runs_per_game`・`batter_ops`・`pitcher_era` による補正は無くなりました（エンジンは全員をリーグ平均として扱います）
+
+## テスト
+
+```bash
+pip install -r requirements.txt pytest httpx
+pytest tests/
+```
 
 ## License
 
-MIT
+コードは MIT。データは MLB Stats API から取得しています（Data © MLB Advanced Media）。
