@@ -1,8 +1,10 @@
 # A correction layer for the engine: results on 2026
 
 The study was pre-registered in [`PREREG.md`](PREREG.md) (frozen in commit
-`0cc376d` before the run). `run_2026.py` was run once on 2026-10-16 at 01:20 JST
-and finished without a restart. Its output is in [`published/`](published/):
+`0cc376d` before the run). `run_2026.py` was run on 2026-10-16 at 01:20 JST
+and finished without a restart. This is the only run of the frozen script. An
+earlier, unfrozen version had been run on 2026 by mistake on 2026-10-15 and
+its output was deleted unread; [`PREREG.md`](PREREG.md) discloses it. Its output is in [`published/`](published/):
 `results_2026.json` (every number below), `pred_2026.parquet` (each arm's
 prediction for every plate appearance) and `run_2026.log`. The input hashes
 it recorded match `FROZEN_MD5`.
@@ -21,14 +23,17 @@ than the engine alone and than a plain recalibration of the engine.
 2026: 184,327 plate appearances in 2,429 games. The interval comes from 2,000
 bootstrap resamples of games.
 
-An independent recomputation from `pred_2026.parquet` used a different
+An independent recomputation from `pred_2026.parquet`
+([`check_independent.py`](check_independent.py), output in
+`published/check_independent.log`, written after the run) used a different
 implementation, seed and 4,000 resamples. It gives the same Brier scores to
 five decimals and the same conclusion: TEAM − RECAL is −0.00151 (−0.00262 to
-−0.00045, p 0.0037), and TEAM − ENGINE is −0.00165 (−0.00273 to −0.00056, p 0.0022).
+−0.00045, p 0.0037), and TEAM − ENGINE is −0.00165 (−0.00278 to −0.00056, p 0.0030).
 
 The gain is about the size the training-season sizing expected (−0.0012 to
 −0.0024 by season). The dry run, fitted on 2022–2024 and scored on 2025,
-gave −0.00122 there, with an interval that just touched zero.
+gave −0.00122 there, with an interval that crossed zero (−0.00253 to
++0.00009).
 
 ## All arms (reported)
 
@@ -41,9 +46,9 @@ gave −0.00122 there, with an interval that just touched zero.
 | INGAME | 0.15830 | 0.47112 | | | |
 | FULL | 0.15666 | 0.46710 | | | |
 
-As in the sizing, team strength helps most early in the game. TEAM − RECAL
-is −0.0026 in the early third, −0.0013 in the middle third and −0.0006 in
-the last third.
+As in the sizing, the point estimates are largest early in the game. TEAM −
+RECAL is −0.0026 in the early third, −0.0013 in the middle third and −0.0006
+in the last third. These are reported only, without intervals.
 
 Reported-only differences (no claim is made from them):
 - RECAL − ENGINE: −0.00014 (−0.00046 to +0.00019).
@@ -68,13 +73,18 @@ the gap down to 1.3 points and TEAM to 1.4 points. The difference
 | RECAL | 0.3833 | +0.0127 |
 | TEAM | 0.3843 | +0.0137 |
 
-Most of the band's gap is closed by recalibration alone (RECAL), not by team
-strength. So the band result does not show that team strength is what fixes
-the band. The README keeps the band caveat for the engine alone.
+The band's observed rate is itself uncertain (ENGINE's gap +0.033, 95%
+interval +0.005 to +0.059 in `check_independent.log`). How much of the gap
+recalibration closes cannot be told from one season: |gap RECAL| − |gap
+ENGINE| is −0.020 (−0.020 to +0.010). What is tight is that team strength
+does not move the band beyond what recalibration does: TEAM − RECAL in the
+band's mean prediction is +0.001 (−0.0016 to +0.0036). So this study does not
+show that team strength is what makes the engine too high in the band. The
+README keeps the band caveat for the engine alone.
 
-By TEAM's own deciles, its mean prediction is within 1.4 points of the
-observed rate in every decile (largest: 0.8–0.9, predicted 0.852, observed
-0.838).
+In fixed 0.1-wide bins of its own prediction, TEAM's mean prediction is
+within 1.4 points of the observed rate in every bin (largest: 0.8–0.9,
+predicted 0.852, observed 0.838).
 
 ## What follows (as pre-registered)
 
