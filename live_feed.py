@@ -299,11 +299,15 @@ def live_wp(state: dict) -> dict:
     status = state["status"]
     if status in ("Scheduled", "Pre-Game", "Warmup") or status.startswith("Delayed Start"):
         return {**state, "status_note": "Game not yet started", "win_probability": None}
+    if status.startswith(("Postponed", "Cancelled", "Suspended")):
+        return {**state, "status_note": status, "win_probability": None}
     if status.startswith(("Final", "Game Over", "Completed Early")):
-        won = state["score_home"] > state["score_away"]
+        h, a = state["score_home"], state["score_away"]
+        if h == a:
+            return {**state, "status_note": "Game over (tie)", "win_probability": None}
         return {**state, "status_note": "Game over",
-                "win_probability": 1.0 if won else 0.0,
-                "win_probability_pct": "100.0%" if won else "0.0%"}
+                "win_probability": 1.0 if h > a else 0.0,
+                "win_probability_pct": "100.0%" if h > a else "0.0%"}
 
     analysis = full_analysis(
         state["inning"], state["top_bottom"], state["outs"], state["runners"],

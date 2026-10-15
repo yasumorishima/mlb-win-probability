@@ -157,7 +157,8 @@ def get_wp_advice(
         raise HTTPException(status_code=422, detail="the game is over in this state")
     adv, problems, payload = get_advice(result, lang.value)
     if adv is None:
-        raise HTTPException(status_code=502, detail="no valid response from the model")
+        raise HTTPException(status_code=502,
+                            detail="no valid response from the model: " + "; ".join(problems))
     return {
         **result,
         "advice": adv.model_dump(),

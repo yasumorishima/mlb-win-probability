@@ -59,10 +59,14 @@ OUTCOMES = [
 ]
 
 
-@lru_cache(maxsize=2)
 def get_engine(extra_runner: bool = True) -> Engine:
     """The engine; `extra_runner=False` for games without the automatic
     runner on second in extra innings (postseason)."""
+    return _engine(bool(extra_runner))
+
+
+@lru_cache(maxsize=None)
+def _engine(extra_runner: bool) -> Engine:
     return Engine.load(TABLES_PATH, extra_runner=extra_runner)
 
 
@@ -402,11 +406,16 @@ def advice_inputs(analysis: dict, lang: str = "EN", players: dict | None = None)
 
 def get_advice(analysis: dict, lang: str = "EN", players: dict | None = None):
     """(Advice | None, citation problems, payload). Calls the API only when
-    ANTHROPIC_API_KEY is set; otherwise returns None without importing anthropic."""
+    ANTHROPIC_API_KEY is set; otherwise returns None without importing anthropic.
+    An API error (authentication, rate limit, network) also gives None, with
+    the error type in the problems list."""
     situation, engine, players = advice_inputs(analysis, lang, players)
     payload = {"situation": situation, "engine": engine, "players": players}
     if not has_api_key():
         return None, ["ANTHROPIC_API_KEY is not set"], payload
     import strategist
-    adv, problems = strategist.advise(situation, engine, players)
+    try:
+        adv, problems = strategist.advise(situation, engine, players)
+    except Exception as e:  # anthropic.APIError and transport errors
+        return None, [f"API call failed: {type(e).__name__}"], payload
     return adv, problems, payload

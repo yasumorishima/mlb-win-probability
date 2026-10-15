@@ -75,6 +75,8 @@ T = {
         "runner_2b": "Runner on 2B",
         "runner_3b": "Runner on 3B",
         "extra_note": "Extra innings: regular-season half-innings start with a runner on 2nd.",
+        "xr": "Extra innings start with a runner on 2nd (off for postseason)",
+        "diff_clipped": "The live score difference ({d:+d}) is outside the slider; analysed as {c:+d}.",
         "presets": "Presets",
         "diamond": "Diamond",
         "home_leads": "Home leads by {n}",
@@ -157,6 +159,8 @@ T = {
         "runner_2b": "2塁にランナーあり",
         "runner_3b": "3塁にランナーあり",
         "extra_note": "延長戦：レギュラーシーズンは各回とも走者二塁から始まります。",
+        "xr": "延長は走者二塁から（ポストシーズンはオフ）",
+        "diff_clipped": "ライブの得点差（{d:+d}）はスライダーの範囲外のため {c:+d} として分析しています。",
         "presets": "プリセット",
         "diamond": "ダイヤモンド",
         "home_leads": "ホーム {n} 点リード",
@@ -613,6 +617,7 @@ with st.container():
                     "balls": cached.get("balls"),
                     "strikes": cached.get("strikes"),
                     "sched": cached.get("scheduled_innings", 9),
+                    "extra_runner": cached.get("extra_runner", True),
                 }
                 st.rerun()
 
@@ -638,12 +643,16 @@ if "_preset" in st.session_state:
         st.session_state.pop(k, None)
     st.session_state["w_outs"] = int(p["outs"])
     st.session_state["w_diff"] = int(max(-10, min(10, p["score_diff"])))
+    st.session_state["diff_clipped"] = (int(p["score_diff"]) if abs(int(p["score_diff"])) > 10
+                                        else None)
+    st.session_state["w_xr"] = bool(p.get("extra_runner", True))
     st.session_state["w_r1"], st.session_state["w_r2"], st.session_state["w_r3"] = (
         bool(x) for x in p["runners"])
     st.session_state["w_balls"] = int(p.get("balls") or 0)
     st.session_state["w_strikes"] = int(p.get("strikes") or 0)
     st.session_state["w_sched"] = p.get("sched", 9) if p.get("sched", 9) in SCHED_OPTIONS else 9
 st.session_state.setdefault("w_diff", 0)
+st.session_state.setdefault("w_xr", True)
 # The half selector shows translated labels; the frontend keeps the labels of a
 # keyed widget, so each language gets its own widget and "half" carries the value.
 st.session_state.setdefault("half", "top")
@@ -686,8 +695,12 @@ with col_settings:
         runner2 = st.checkbox(_["runner_2b"], key="w_r2")
     with r3_col:
         runner3 = st.checkbox(_["runner_3b"], key="w_r3")
-    if inning > sched:
+    extra_runner = st.checkbox(_["xr"], key="w_xr")
+    if inning > sched and extra_runner:
         st.caption(_["extra_note"])
+    clipped = st.session_state.get("diff_clipped")
+    if clipped is not None and score_diff == max(-10, min(10, clipped)):
+        st.caption(_["diff_clipped"].format(d=clipped, c=score_diff))
 
 with col_preset:
     st.markdown(f"### {_['presets']}")
@@ -697,7 +710,7 @@ with col_preset:
             st.session_state["_preset"] = {
                 "inning": s.inning, "top_bottom": s.top_bottom, "outs": s.outs,
                 "runners": s.runners, "score_diff": s.score_diff,
-                "balls": 0, "strikes": 0, "sched": s.scheduled_innings,
+                "balls": 0, "strikes": 0, "sched": s.scheduled_innings, "extra_runner": True,
             }
             st.rerun()
 
@@ -708,7 +721,8 @@ runners = (int(runner1), int(runner2), int(runner3))
 # Analysis
 # ============================================================
 
-result = full_analysis(inning, top_bottom, outs, runners, score_diff, sched, balls, strikes)
+result = full_analysis(inning, top_bottom, outs, runners, score_diff, sched, balls, strikes,
+                       extra_runner=extra_runner)
 
 wp = result["win_probability"]
 li_val = result["leverage_index"]
@@ -801,7 +815,8 @@ if not api_key_available():
 elif result["game_over"]:
     st.info(_["coach_game_over"])
 else:
-    state_key = json.dumps([inning, top_bottom, outs, runners, score_diff, sched, balls, strikes, lang])
+    state_key = json.dumps([inning, top_bottom, outs, runners, score_diff, sched, balls, strikes,
+                            extra_runner, lang])
     if st.button(_["coach_ask"], key="ask_coach"):
         with st.spinner(_["coach_asking"]):
             adv, problems, _payload = get_advice(result, lang)
@@ -811,7 +826,7 @@ else:
     if last and last["key"] == state_key:
         adv = last["advice"]
         if adv is None:
-            st.warning(_["coach_failed"])
+            st.warning(_["coach_failed"] + " " + "; ".join(last["problems"]))
         else:
             rec_en, rec_ja = RECOMMENDATION_NAMES.get(adv.recommendation,
                                                       (adv.recommendation, adv.recommendation))
@@ -827,7 +842,8 @@ else:
                 unsafe_allow_html=True,
             )
             if not adv.follows_engine and adv.departure_reason:
-                st.markdown(f"**{_['coach_departs']}:** {adv.departure_reason}")
+                st.markdown(f'<div><strong>{esc(_["coach_departs"])}:</strong> '
+                            f'{esc(adv.departure_reason)}</div>', unsafe_allow_html=True)
             if adv.cited:
                 st.markdown(f"**{_['coach_cited']}**")
                 st.table([{"key": c.name, "value": c.value} for c in adv.cited])

@@ -196,3 +196,27 @@ def test_get_advice_without_key(monkeypatch):
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     adv, problems, payload = a.get_advice(a.full_analysis(1, "top", 0, (0, 0, 0), 0))
     assert adv is None and problems and "engine" in payload
+
+
+def test_engine_cache_one_slot_per_flag():
+    a.get_engine()
+    a.get_engine(True)
+    a.get_engine(False)
+    before = a._engine.cache_info().misses
+    for flag in (True, False, 1, 0, True):
+        a.get_engine(flag)
+    assert a._engine.cache_info().misses == before
+    assert a.get_engine(True) is a.get_engine()
+
+
+def test_get_advice_catches_api_errors(monkeypatch):
+    pytest.importorskip("pydantic")
+    import strategist
+
+    def boom(*args):
+        raise ConnectionError("network down")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    monkeypatch.setattr(strategist, "advise", boom)
+    adv, problems, _ = a.get_advice(a.full_analysis(5, "top", 0, (1, 0, 0), 0))
+    assert adv is None and problems == ["API call failed: ConnectionError"]

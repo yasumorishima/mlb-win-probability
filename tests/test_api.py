@@ -106,3 +106,16 @@ def test_live_endpoint_uses_feed(monkeypatch):
     assert body["leverage_label"] in ("Low", "Medium", "High", "Very High")
     monkeypatch.setattr(live_feed, "get_live_state", lambda pk: None)
     assert client.get("/wp/live/1").status_code == 404
+
+
+def test_advice_api_error_is_502(monkeypatch):
+    pytest.importorskip("pydantic")
+    import strategist
+
+    def boom(*args):
+        raise TimeoutError("slow")
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    monkeypatch.setattr(strategist, "advise", boom)
+    r = client.get("/wp/advice", params=dict(inning=8, top_bottom="bottom", outs=0, runner1=1))
+    assert r.status_code == 502 and "TimeoutError" in r.json()["detail"]

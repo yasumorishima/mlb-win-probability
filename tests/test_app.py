@@ -84,6 +84,35 @@ if with_key:
     assert "&lt;b&gt;Walk him&lt;/b&gt;" in md          # model text is escaped
     assert any("made-up problem" in w.value for w in at.warning)
 
+# postseason rules: without the automatic runner, top 10 tied differs
+at.selectbox(key="w_inning").set_value(10).run()
+at.selectbox(key="w_half_" + lang).set_value("top").run()
+at.checkbox(key="w_r1").uncheck().run()
+at.checkbox(key="w_r2").uncheck().run()
+at.slider(key="w_diff").set_value(0).run()
+at.selectbox(key="w_balls").set_value(0).run()
+at.selectbox(key="w_outs").set_value(0).run()
+import analysis
+def gauge_md():
+    return " ".join(m.value for m in at.markdown)
+with_runner = analysis.batting_wp(analysis.home_wp(10, "top", 0, (0, 0, 0), 0), "top")
+without = analysis.batting_wp(analysis.home_wp(10, "top", 0, (0, 0, 0), 0, extra_runner=False), "top")
+assert f"{with_runner * 100:.1f}%" in gauge_md(), gauge_md()[-400:]
+at.checkbox(key="w_xr").uncheck().run()
+assert not at.exception, at.exception
+assert f"{without * 100:.1f}%" in gauge_md()
+at.checkbox(key="w_xr").check().run()
+
+# a live state applied to the widgets (what "Apply to Analysis" stores)
+at.session_state["_preset"] = {"inning": 11, "top_bottom": "bottom", "outs": 2,
+                               "runners": (0, 1, 0), "score_diff": -14, "balls": 3,
+                               "strikes": 2, "sched": 9, "extra_runner": False}
+at.run()
+assert not at.exception, at.exception
+assert at.checkbox(key="w_xr").value is False
+assert at.selectbox(key="w_inning").value == 11 and at.slider(key="w_diff").value == -10
+assert any("-14" in c.value for c in at.caption), [c.value for c in at.caption]
+
 # replay mode renders without network until a button is pressed
 at.sidebar.radio[1].set_value("🎬 Replay Mode").run()
 assert not at.exception, at.exception

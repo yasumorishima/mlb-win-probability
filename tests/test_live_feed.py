@@ -83,3 +83,24 @@ def test_live_state_mid_plate_appearance():
     s = parse_live_state(feed)
     assert (s["inning"], s["top_bottom"], s["outs"], s["runners"]) == (5, "bottom", 1, (1, 0, 1))
     assert (s["balls"], s["strikes"]) == (2, 1)
+
+
+def test_live_state_after_a_play_that_did_not_end_the_half():
+    done = _play(2, True, 1, (1, 0, 1), 0, 0, event="Single")
+    s = parse_live_state(_feed([done], current=done))
+    assert (s["inning"], s["top_bottom"], s["outs"], s["runners"]) == (2, "top", 1, (1, 0, 1))
+    assert (s["balls"], s["strikes"]) == (0, 0)
+
+
+def test_live_wp_statuses():
+    from live_feed import live_wp
+
+    base = {"inning": 3, "top_bottom": "top", "outs": 0, "runners": (0, 0, 0), "score_home": 2,
+            "score_away": 2, "score_diff": 0, "scheduled_innings": 9, "extra_runner": True,
+            "balls": None, "strikes": None}
+    for status in ("Postponed", "Cancelled", "Suspended: Rain", "Scheduled"):
+        assert live_wp({**base, "status": status})["win_probability"] is None
+    assert live_wp({**base, "status": "Final: Tied"})["win_probability"] is None
+    assert live_wp({**base, "status": "Final", "score_home": 3})["win_probability"] == 1.0
+    assert live_wp({**base, "status": "Final", "score_away": 3})["win_probability"] == 0.0
+    assert 0 < live_wp({**base, "status": "In Progress"})["win_probability"] < 1
