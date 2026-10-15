@@ -1,0 +1,71 @@
+name: Build game states
+
+# Re-fetches play-by-play from the MLB Stats API (keyless) and builds the
+# plate-appearance / runner-event / pitch tables used to fit the engine.
+# Each season is written to the GitHub Release `states-v1` as parquet.
+
+on:
+  workflow_dispatch:
+    inputs:
+      memo:
+        description: "Why this run"
+        required: true
+      seasons:
+        description: "JSON list of seasons"
+        required: true
+        default: "[2021, 2022, 2023, 2024, 2025, 2026]"
+      until:
+        description: "Last date to include (YYYY-MM-DD, blank = whole season)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-states
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ensure release exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view states-v1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create states-v1 --repo "$GITHUB_REPOSITORY" --title "Game states v1" \
+              --notes "Plate-appearance, runner-event and pitch tables rebuilt from the MLB Stats API by scripts/build_states.py. Data (c) MLB Advanced Media, see https://gdx.mlb.com/components/copyright.txt" \
+              --prerelease
+
+  build:
+    needs: release
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        season: ${{ fromJSON(github.event.inputs.seasons) }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install pandas pyarrow
+      - name: Build season
+        env:
+          MEMO: ${{ github.event.inputs.memo }}
+          UNTIL: ${{ github.event.inputs.until }}
+          SEASON: ${{ matrix.season }}
+        run: |
+          echo "memo: $MEMO"
+          python scripts/build_states.py --season "$SEASON" --out out \
+            --workers 4 ${UNTIL:+--until "$UNTIL"}
+      - name: Upload to release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ls -la out
+          gh release upload states-v1 out/*.parquet --clobber --repo "$GITHUB_REPOSITORY"
