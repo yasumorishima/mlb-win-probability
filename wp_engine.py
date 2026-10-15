@@ -33,7 +33,6 @@ from __future__ import annotations
 import json
 from collections import defaultdict
 from dataclasses import dataclass
-from functools import lru_cache
 from pathlib import Path
 
 import numpy as np
@@ -99,7 +98,7 @@ def fit_tables(pa, pitch=None, min_bunts: int = 30) -> dict:
     """
     trans = {"top": defaultdict(lambda: defaultdict(float)),
              "bottom": defaultdict(lambda: defaultdict(float))}
-    by_class = defaultdict(lambda: defaultdict(float))     # (state, class) -> (next, runs)
+    by_class = defaultdict(lambda: defaultdict(float))     # (half, state, class) -> (next, runs)
     bunts = defaultdict(lambda: defaultdict(float))        # state -> (next, runs)
     n_state = defaultdict(float)
 
@@ -111,7 +110,7 @@ def fit_tables(pa, pitch=None, min_bunts: int = 30) -> dict:
         runs = int(min(max(r.runs_on_play, 0), 4))
         key = (nxt, runs)
         trans[r.half][s][key] += 1
-        by_class[(s, outcome_class(r.event_type))][key] += 1
+        by_class[(r.half, s, outcome_class(r.event_type))][key] += 1
         n_state[s] += 1
         if r.is_bunt:
             bunts[s][key] += 1
@@ -122,7 +121,7 @@ def fit_tables(pa, pitch=None, min_bunts: int = 30) -> dict:
 
     tables = {
         "transitions": {h: {_skey(s): norm(d) for s, d in t.items()} for h, t in trans.items()},
-        "by_class": {f"{_skey(s)}|{c}": norm(d) for (s, c), d in by_class.items()},
+        "by_class": {f"{h}|{_skey(s)}|{c}": norm(d) for (h, s, c), d in by_class.items()},
         "bunt": {_skey(s): {"n": int(sum(d.values())), "dist": norm(d)}
                  for s, d in bunts.items() if sum(d.values()) >= min_bunts},
         "n_pa": int(len(pa)),
@@ -140,7 +139,7 @@ def _class_given_count(pa, pitch) -> dict:
     seen = set()
     for g, a, b, s in pitch[["game_pk", "at_bat_index", "balls", "strikes"]].itertuples(index=False):
         k = (g, a, int(b), int(s))
-        if k in seen or (g, a) not in cls:
+        if k in seen or (g, a) not in cls or not (0 <= b <= 3 and 0 <= s <= 2):
             continue
         seen.add(k)
         counts[(int(b), int(s))][cls[(g, a)]] += 1
@@ -183,11 +182,11 @@ class Engine:
                           for k, v in d.items()} for h, d in tables["transitions"].items()}
         self.by_class = {}
         for k, v in tables.get("by_class", {}).items():
-            sk, c = k.split("|")
-            self.by_class[(_parse(sk), c)] = [(tuple(n), r, p) for n, r, p in v]
+            h, sk, c = k.split("|")
+            self.by_class[(h, _parse(sk), c)] = [(tuple(n), r, p) for n, r, p in v]
         self.cgc = tables.get("class_given_count", {})
         self.runs = {h: self._runs_dist(h) for h in ("top", "bottom")}
-        self._H.cache_clear()
+        self._hcache: dict = {}
 
     @classmethod
     def load(cls, path: str | Path, **kw) -> "Engine":
@@ -220,12 +219,16 @@ class Engine:
             return (0, 0, 1, 0)
         return (0, 0, 0, 0)
 
-    @lru_cache(maxsize=None)
     def _H(self, inning: int, half: str, diff: int, sched: int) -> float:
         """P(home wins) at the start of a half-inning, diff = home - away."""
-        if inning > MAX_INNING:
-            return 0.5 + 0.04 * np.sign(diff)  # far tail; effectively unreachable
-        return self._wp_in_half(inning, half, self._start_state(inning, sched), diff, sched)
+        key = (inning, half, diff, sched)
+        if key not in self._hcache:
+            if inning > MAX_INNING:
+                v = 0.5 + 0.04 * np.sign(diff)  # far tail; effectively unreachable
+            else:
+                v = self._wp_in_half(inning, half, self._start_state(inning, sched), diff, sched)
+            self._hcache[key] = v
+        return self._hcache[key]
 
     def _wp_in_half(self, inning, half, state, diff, sched) -> float:
         dist = self.runs[half][state]
@@ -277,21 +280,27 @@ class Engine:
         return float(self._wp_in_half(inning, half, nxt, _clip(d), sched))
 
     def wp_at_count(self, inning, half, outs, bases, diff, balls, strikes, sched=9):
-        """Home WP with the count (balls, strikes) reached in this PA."""
-        key = f"{balls}-{strikes}"
-        cg = self.cgc.get(key)
+        """Home WP with the count (balls, strikes) reached in this PA.
+
+        The count-free WP already averages over every PA from this state.
+        The count shifts the mix of outcome classes; the WP moves by that
+        shift times the value of each class from this state:
+            wp + sum_c [P(c | count) - P(c | 0-0)] * V(c)
+        so the value at 0-0 (reached by every PA) equals the count-free WP.
+        """
+        base = self.wp(inning, half, outs, bases, diff, sched)
+        cg, c0 = self.cgc.get(f"{balls}-{strikes}"), self.cgc.get("0-0")
+        if not cg or not c0 or (balls, strikes) == (0, 0):
+            return base
         s = _state(outs, *bases)
-        if not cg:
-            return self.wp(inning, half, outs, bases, diff, sched)
-        total, mass = 0.0, 0.0
-        for c, pc in cg["p"].items():
-            rows = self.by_class.get((s, c))
-            if not rows or pc == 0:
+        adj = 0.0
+        for c in CLASSES:
+            rows = self.by_class.get((half, s, c))
+            if not rows:
                 continue
             v = sum(p * self._wp_after(inning, half, nxt, r, diff, sched) for nxt, r, p in rows)
-            total += pc * v
-            mass += pc
-        return total / mass if mass else self.wp(inning, half, outs, bases, diff, sched)
+            adj += (cg["p"].get(c, 0.0) - c0["p"].get(c, 0.0)) * v
+        return float(min(1.0, max(0.0, base + adj)))
 
     def leverage(self, inning, half, outs, bases, diff, sched=9, league_swing=None) -> float:
         """Expected |WP change| of the next PA (divide by league average for LI)."""
@@ -335,8 +344,10 @@ class Engine:
             else:
                 w_f = wp_off(inning, after_out(outs), fail, diff)
             be = (now - w_f) / (w_s - w_f) if w_s > w_f else None
-            out.append(TacticResult(name, "offense", now, None, None, breakeven=be,
-                                    note="count held fixed; pickoff and wild-pitch paths ignored"))
+            note = "count held fixed; pickoff and wild-pitch paths ignored"
+            if be is None or be > 1.0:
+                be, note = 1.0, "no success rate makes this steal pay off; " + note
+            out.append(TacticResult(name, "offense", now, None, None, breakeven=be, note=note))
 
         # sacrifice bunt (observed outcomes of bunts from this state)
         bt = self.t.get("bunt", {}).get(_skey(_state(outs, *bases)))
@@ -346,7 +357,8 @@ class Engine:
                 w = self._wp_after(inning, half, tuple(nxt), r, diff, sched)
                 v += p * (w if home_bat else 1.0 - w)
             out.append(TacticResult("sacrifice_bunt", "offense", now, v, v - now, n=bt["n"],
-                                    note="outcomes of PAs that ended on a bunt; bunts fouled off are not in the sample"))
+                                    note=("outcomes of PAs that ended on a bunt, including bunts for a hit; "
+                                          "bunts fouled off are not in the sample")))
 
         # intentional walk (defense's view)
         if not (b1 and b2 and b3):

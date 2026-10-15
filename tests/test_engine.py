@@ -9,7 +9,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from wp_engine import Engine, fit_tables, _force, outcome_class  # noqa: E402
+from wp_engine import END, Engine, fit_tables, _force, outcome_class  # noqa: E402
 
 RNG = np.random.default_rng(7)
 EVENTS = [("strikeout", 0.24), ("field_out", 0.44), ("walk", 0.09),
@@ -30,9 +30,9 @@ def _advance(bases, ev):
     return bases, 0
 
 
-def _simulate(n_halves=6000, half="top"):
+def _simulate(n_halves=6000, half="top", events=EVENTS):
     rows, pitches = [], []
-    names, probs = zip(*EVENTS)
+    names, probs = zip(*events)
     gid = 0
     for h in range(n_halves):
         outs, bases = 0, (0, 0, 0)
@@ -61,10 +61,9 @@ def _simulate(n_halves=6000, half="top"):
     return rows, pitches
 
 
-@pytest.fixture(scope="module")
-def engine():
+def _build(bottom_events=EVENTS):
     top, ptop = _simulate(half="top")
-    bot, pbot = _simulate(half="bottom")
+    bot, pbot = _simulate(half="bottom", events=bottom_events)
     for r in bot:
         r["game_pk"] += 10**6
     for r in pbot:
@@ -72,6 +71,11 @@ def engine():
     pa = pd.DataFrame(top + bot)
     pitch = pd.DataFrame(ptop + pbot)
     return Engine(fit_tables(pa, pitch, min_bunts=1))
+
+
+@pytest.fixture(scope="module")
+def engine():
+    return _build()
 
 
 def test_symmetric_world_starts_near_even(engine):
@@ -99,8 +103,50 @@ def test_walkoff_rules(engine):
 
 
 def test_extra_inning_runner_matters(engine):
-    with_runner = Engine(engine.t, extra_runner=True).wp(10, "top", 0, (0, 1, 0), 0)
-    assert 0.3 < with_runner < 0.7
+    with_runner = Engine(engine.t, extra_runner=True)
+    without = Engine(engine.t, extra_runner=False)
+    # tied going to the bottom of the 9th: extra innings start differently
+    a = with_runner.wp(9, "bottom", 2, (0, 0, 0), 0)
+    b = without.wp(9, "bottom", 2, (0, 0, 0), 0)
+    assert abs(a - b) > 0.002
+    assert 0.3 < with_runner.wp(10, "top", 0, (0, 1, 0), 0) < 0.7
+
+
+def test_end_of_half_rules(engine):
+    e = engine
+    # bottom of the 9th ends tied: extra innings
+    assert e._wp_after(9, "bottom", END, 0, 0, 9) == e._H(10, "top", 0, 9)
+    # bottom of the 9th ends behind: loss; a run that puts home ahead: win
+    assert e._wp_after(9, "bottom", END, 0, -1, 9) == 0.0
+    assert e._wp_after(9, "bottom", (1, 0, 0, 0), 2, -1, 9) == 1.0
+    # top of the 9th ends with home ahead: win; top of the 5th: bottom half follows
+    assert e._wp_after(9, "top", END, 0, 1, 9) == 1.0
+    assert e._wp_after(5, "top", END, 1, 0, 9) == e._H(5, "bottom", -1, 9)
+    # seven-inning games: the 7th is the last scheduled inning
+    assert e._wp_after(7, "top", END, 0, 1, 7) == 1.0
+
+
+def test_each_half_uses_its_own_transitions():
+    strong_home = [("strikeout", 0.20), ("field_out", 0.38), ("walk", 0.10),
+                   ("single", 0.18), ("double", 0.07), ("home_run", 0.07)]
+    e = _build(bottom_events=strong_home)
+    assert e.wp(1, "top", 0, (0, 0, 0), 0) > 0.65
+
+
+def test_failed_steal_costs_an_out(engine):
+    e = engine
+    args = (8, "bottom", 1, (1, 0, 0), 0)
+    res = {t.tactic: t for t in e.tactics(*args)}
+    now = e.wp(*args)
+    w_s = e.wp(8, "bottom", 1, (0, 1, 0), 0)
+    w_f = e.wp(8, "bottom", 2, (0, 0, 0), 0)
+    assert res["steal_2b"].breakeven == pytest.approx((now - w_f) / (w_s - w_f))
+    # with two outs a failed steal ends the inning
+    res2 = {t.tactic: t for t in e.tactics(8, "bottom", 2, (1, 0, 0), 0)}
+    now2 = e.wp(8, "bottom", 2, (1, 0, 0), 0)
+    w_s2 = e.wp(8, "bottom", 2, (0, 1, 0), 0)
+    w_f2 = e._wp_after(8, "bottom", END, 0, 0, 9)
+    assert res2["steal_2b"].breakeven == pytest.approx(min(1.0, (now2 - w_f2) / (w_s2 - w_f2)))
 
 
 def test_count_layer_moves_the_right_way(engine):
@@ -108,8 +154,9 @@ def test_count_layer_moves_the_right_way(engine):
     behind = engine.wp_at_count(*args, 0, 2)
     ahead = engine.wp_at_count(*args, 3, 0)
     assert ahead > behind
-    # 0-0 is reached by every PA: close to the count-free value
-    assert abs(engine.wp_at_count(*args, 0, 0) - engine.wp(*args)) < 0.01
+    # 0-0 is reached by every PA: exactly the count-free value
+    for st in [(7, "bottom", 1, (1, 0, 0), 0), (9, "bottom", 1, (0, 1, 1), -1), (3, "top", 0, (0, 0, 0), 2)]:
+        assert engine.wp_at_count(*st, 0, 0) == engine.wp(*st)
 
 
 def test_steal_breakeven_is_a_probability(engine):
