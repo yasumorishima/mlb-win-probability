@@ -38,6 +38,24 @@ if with_key:
 
     strategist.advise = fake_advise
 
+import live_feed
+fetches = []
+LIVE = {"inning": 5, "top_bottom": "top", "outs": 1, "runners": (1, 0, 0), "score_home": 2,
+        "score_away": 1, "score_diff": 1, "status": "In Progress", "away_team": "A",
+        "home_team": "H", "batter_name": "b", "pitcher_name": "p", "balls": 1, "strikes": 1,
+        "scheduled_innings": 9, "extra_runner": True}
+
+def fake_games(date=None):
+    return [{"gamePk": 1, "away_team": "A", "home_team": "H", "status": "In Progress",
+             "start_time_utc": ""}]
+
+def fake_state(pk):
+    fetches.append(pk)
+    return dict(LIVE)
+
+live_feed.get_todays_games = fake_games
+live_feed.get_live_state = fake_state
+
 at = AppTest.from_file(ROOT + "/streamlit_app.py", default_timeout=120)
 at.run()
 assert not at.exception, at.exception
@@ -123,6 +141,26 @@ assert not at.exception, at.exception
 assert at.checkbox(key="w_xr").value is False
 assert at.selectbox(key="w_inning").value == 11 and at.slider(key="w_diff").value == -10
 assert any("-14" in c.value for c in at.caption), [c.value for c in at.caption]
+
+# live panel: auto-refresh fetches again once its interval has passed, without a click
+at.button(key="fetch_games").click().run()
+at.button(key="load_live").click().run()
+assert not at.exception, at.exception
+assert len(fetches) == 1 and any(b.key == "apply_live" for b in at.button)
+at.checkbox(key="auto_refresh").check().run()
+assert not at.exception, at.exception
+assert len(fetches) == 1                       # just loaded: no second fetch yet
+assert any("UTC" in c.value for c in at.caption), [c.value for c in at.caption]
+at.session_state["live_last_refresh"] = 0.0     # as if 30 s had passed
+LIVE["status"] = "Final"
+at.run()
+assert not at.exception, at.exception
+assert len(fetches) == 2
+assert not any(b.key == "apply_live" for b in at.button)   # game over: nothing to apply
+at.checkbox(key="auto_refresh").uncheck().run()
+at.session_state["live_last_refresh"] = 0.0
+at.run()
+assert len(fetches) == 2                       # off: no refetch
 
 # replay mode renders without network until a button is pressed
 at.sidebar.radio[1].set_value("🎬 Replay Mode").run()
