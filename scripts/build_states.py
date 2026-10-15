@@ -140,6 +140,7 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
         raise StateError(f"{game_pk}: {e}") from None
     plays = feed["liveData"]["plays"]["allPlays"]
     pa_rows, run_rows, pitch_rows = [], [], []
+    steal_counts = [0, 0]   # stolen bases, caught stealing (incl. pickoff CS) extracted
 
     prev_half = None
     outs = 0
@@ -240,11 +241,7 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
             if "count" in e:
                 count = {"balls": e["count"]["balls"], "strikes": e["count"]["strikes"]}
                 ev_outs = min(e["count"].get("outs", ev_outs), 3)
-        if last_pitch is not None:
-            last_count = {"balls": events[last_pitch]["count"]["balls"],
-                          "strikes": events[last_pitch]["count"]["strikes"]}
-        else:
-            last_count = {"balls": 0, "strikes": 0}
+        last_count = {"balls": play["count"]["balls"], "strikes": play["count"]["strikes"]}
 
         # Pass 2: runner outcomes come from runners[] (authoritative). In the
         # event list an inning-ending caught stealing is an empty "no_pitch"
@@ -253,10 +250,15 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
         # playIndex if that event is a pitch, else the latest earlier pitch.
         # Pickoff outcomes happen between pitches: state before the event.
         seen = set()
+        n_before = len(run_rows)
         for r in play.get("runners", []):
             rd = r.get("details", {})
             et = rd.get("eventType") or ""
             if not (et.startswith(STEAL_TYPES) or et.startswith("pickoff_")):
+                continue
+            # eventType is per play: a runner who merely advanced on the same
+            # play carries it too. Keep only the runner whose own movement it is.
+            if rd.get("movementReason") != f"r_{et}":
                 continue
             key = ((rd.get("runner") or {}).get("id"), rd.get("playIndex"), et)
             if key in seen:
@@ -265,15 +267,37 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
             k = pos_of.get(rd.get("playIndex"))
             if k is None:
                 raise StateError(f"{game_pk}: runner event {et} points to a missing playIndex")
-            on_pitch = et.startswith(("stolen_base_", "caught_stealing_"))
             pk_ = None
-            if on_pitch:
-                pk_ = k if events[k].get("isPitch") else before[k]["last_pitch"]
-            snap = before[pk_] if pk_ is not None else before[k]
+            if et.startswith(("stolen_base_", "caught_stealing_")):
+                cand = k if events[k].get("isPitch") else before[k]["last_pitch"]
+                if cand is not None:
+                    going = bool((events[cand].get("details") or {}).get("runnerGoing"))
+                    between = [events[j].get("type") for j in range(cand + 1, k)]
+                    if going and not any(t in ("stepoff", "pickoff", "no_pitch") for t in between):
+                        pk_ = cand
+            if pk_ is not None:
+                snap = before[pk_]
+                if not events[k].get("isPitch") and "count" in events[k]:
+                    after_pitch = events[pk_]["count"]
+                    if (events[k]["count"]["balls"], events[k]["count"]["strikes"]) != \
+                            (after_pitch["balls"], after_pitch["strikes"]):
+                        raise StateError(f"{game_pk}: steal event count does not follow its pitch "
+                                         f"(ab {ab['atBatIndex']}, event {rd.get('playIndex')})")
+            else:
+                # not on a pitch (pitcher-initiated, pickoff): state before the
+                # throw = before the latest pickoff/step-off at or before k when
+                # no pitch intervenes, else before the event itself
+                j = k
+                while j >= 0 and not events[j].get("isPitch"):
+                    if events[j].get("type") in ("pickoff", "stepoff"):
+                        break
+                    j -= 1
+                snap = before[j] if (j >= 0 and not events[j].get("isPitch")) else before[k]
+            credited = sorted({c["position"]["abbreviation"] for c in r.get("credits", [])})
             run_rows.append(dict(
                 game_pk=game_pk, date=date, season=season,
                 at_bat_index=ab["atBatIndex"], event_index=rd.get("playIndex"),
-                row_kind="outcome", event_type=et,
+                row_kind="outcome", event_type=et, credited_positions=",".join(credited),
                 runner=key[0], inning=inning, half=half,
                 outs_before=snap["outs"], balls=snap["balls"], strikes=snap["strikes"],
                 disengagements_before=snap["disengagements"],
@@ -288,6 +312,8 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
                 home_score=home_score, away_score=away_score,
                 is_out=bool(r.get("movement", {}).get("isOut")),
                 description=(events[k].get("details") or {}).get("description")))
+        steal_counts[0] += sum(1 for row in run_rows[n_before:] if row["event_type"].startswith("stolen_base_"))
+        steal_counts[1] += sum(1 for row in run_rows[n_before:] if row["event_type"].startswith(("caught_stealing_", "pickoff_caught_stealing_")))
 
         res = play.get("result", {})
         outs_after = play["count"]["outs"]
@@ -312,6 +338,11 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
         raise StateError(f"{game_pk}: replayed score {home_score}-{away_score} "
                          f"!= final {final_home}-{final_away}")
     _check_invariants(pa_rows, game_pk)
+    box = feed["liveData"]["boxscore"]["teams"]
+    box_sb = sum(int(box[t]["teamStats"]["batting"].get("stolenBases", 0)) for t in ("home", "away"))
+    box_cs = sum(int(box[t]["teamStats"]["batting"].get("caughtStealing", 0)) for t in ("home", "away"))
+    if (box_sb, box_cs) != tuple(steal_counts):
+        raise StateError(f"{game_pk}: extracted SB/CS {steal_counts} != box score {box_sb}/{box_cs}")
     _check_catchers(run_rows, plays, game_pk)
     return pa_rows, run_rows, pitch_rows
 
@@ -382,6 +413,21 @@ def build_season(season: int, out: Path, until: str | None, workers: int,
     # fail closed if more than 1% of games break an invariant
     if len(bad) > 0.01 * max(len(games), 1):
         sys.exit(f"{season}: {len(bad)}/{len(games)} games rejected (>1%) - not writing")
+
+    sb_cs = [r for r in run if r["row_kind"] == "outcome"
+             and r["event_type"].startswith(("stolen_base_2b", "stolen_base_3b",
+                                             "caught_stealing_2b", "caught_stealing_3b"))]
+    share = sum(r["on_pitch"] for r in sb_cs) / max(len(sb_cs), 1)
+    print(f"{season}: steals/caught stealing of 2B/3B {len(sb_cs)}, on a pitch {share:.3f}", flush=True)
+    if season >= 2023 and share < 0.90:
+        sys.exit(f"{season}: only {share:.1%} of steals placed on a pitch - not writing")
+    cs = [r for r in sb_cs if r["event_type"].startswith("caught_stealing_")]
+    on_no_c = sum(1 for r in cs if r["on_pitch"] and "C" not in r["credited_positions"].split(","))
+    off_with_c = sum(1 for r in cs if not r["on_pitch"] and "C" in r["credited_positions"].split(","))
+    print(f"{season}: caught stealing {len(cs)}: on a pitch without a catcher credit {on_no_c}, "
+          f"off a pitch with a catcher credit {off_with_c}", flush=True)
+    if season >= 2023 and (on_no_c + off_with_c) > 0.05 * max(len(cs), 1):
+        sys.exit(f"{season}: on-pitch placement disagrees with catcher credits - not writing")
 
     out.mkdir(parents=True, exist_ok=True)
     pd.DataFrame(pa).to_parquet(out / f"pa_{season}.parquet", index=False)
