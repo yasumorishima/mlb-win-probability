@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -36,17 +37,22 @@ def check_strengths(states: Path) -> bool:
     games = lf.game_table(pa)
     ref = lf.team_strength(games).join(games[["date", "season", "home_team", "away_team"]])
     ref = ref[ref.season == 2025]
-    rows = []
+    rows, retries = [], 0
     for pk, g in ref.iterrows():
-        s = tl.strengths(int(g.home_team), int(g.away_team), str(g.date))
+        for attempt in range(4):     # a failed read is not cached; try again
+            s = tl.strengths(int(g.home_team), int(g.away_team), str(g.date))
+            if s is not None:
+                break
+            retries += 1
+            time.sleep(5)
         if s is None:
-            print("no strengths from the API for", pk, g.date)
+            print("no strengths from the API for", pk, g.date, "after 4 tries")
             return False
         rows.append((pk, s["d_prev"] - g.d_prev, s["d_cur"] - g.d_cur))
     d = pd.DataFrame(rows, columns=["game_pk", "e_prev", "e_cur"]).set_index("game_pk")
     worst = d.abs().max()
     print(f"strengths: {len(d)} games of 2025, max |diff| d_prev {worst.e_prev:.2e} "
-          f"d_cur {worst.e_cur:.2e} (tolerance {TOL})")
+          f"d_cur {worst.e_cur:.2e} (tolerance {TOL}); failed API reads retried: {retries}")
     bad = d[(d.e_prev.abs() > TOL) | (d.e_cur.abs() > TOL)]
     if len(bad):
         print(bad.head(20).to_string())

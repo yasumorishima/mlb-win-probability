@@ -1,0 +1,4 @@
+formula: 184327 plate appearances of 2026, max |team_wp - published| 3.33e-16
+strengths: 2430 games of 2025, max |diff| d_prev 0.00e+00 d_cur 0.00e+00 (tolerance 0.01); failed API reads retried: 1
+PASS
+exit=0
