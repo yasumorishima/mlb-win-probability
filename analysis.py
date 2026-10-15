@@ -50,21 +50,29 @@ TACTIC_NAMES = {
 # not listed here stays in English (tests check that every note the engine can
 # produce is covered).
 NOTE_JA = {
-    "count held fixed": "カウントは今のままで計算",
+    "count held fixed": "カウントは今のままとして計算しています",
     "pickoff and wild-pitch paths ignored": "牽制や暴投による進塁・アウトは含みません",
     "no success rate makes this steal pay off": "成功率が何割でも、この盗塁は割に合いません",
     "outcomes of PAs that ended on a bunt, including bunts for a hit":
-        "バントで終わった打席の結果（バントヒットを含む）",
+        "バントで終わった打席の結果を使っています（バントヒットを含む）",
     "bunts fouled off are not in the sample": "ファウルになったバントは含みません",
     "the bunt outcomes are pooled over all counts but compared with the WP at this count":
         "バントの結果は全カウントをまとめたもので、このカウントでの勝率と比べています",
-    "next batter assumed league-average": "次の打者はリーグ平均として計算",
+    "next batter assumed league-average": "次の打者はリーグ平均として計算しています",
 }
+NO_PAY = "no success rate makes this steal pay off"
 
 
 def note_ja(note: str) -> str:
     parts = [x for x in note.split("; ") if x]
     return "".join(NOTE_JA.get(x, x) + "。" for x in parts)
+
+
+def card_note(note: str, ja: bool, no_pay_shown: bool) -> str:
+    """The note under a tactic card. When the card already says that no success
+    rate pays off, that part is not repeated."""
+    parts = [x for x in note.split("; ") if x and not (no_pay_shown and x == NO_PAY)]
+    return note_ja("; ".join(parts)) if ja else "; ".join(parts)
 
 # Plate-appearance outcome classes of the engine (wp_engine.CLASSES) shown in
 # the what-if panel. "OUT" is every ball-in-play out, double plays included.

@@ -19,6 +19,7 @@ import streamlit as st
 
 from analysis import (
     SCENARIOS,
+    card_note,
     engine_info,
     full_analysis,
     get_advice,
@@ -882,7 +883,7 @@ else:
             f'<div class="tactic-card {css}"><strong>{esc(name)}</strong><br>'
             f'<span style="color:#ddd;font-size:0.95rem;">{esc(detail)}</span><br>'
             f'<span style="color:#888;font-size:0.8rem;">'
-            f'{esc(t["note_ja"] if lang == "JA" else t["note"])}</span></div>',
+            f'{esc(card_note(t["note"], lang == "JA", (t["breakeven"] or 0) >= 1.0))}</span></div>',
             unsafe_allow_html=True,
         )
 

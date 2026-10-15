@@ -140,6 +140,16 @@ def test_every_tactic_note_has_japanese():
     assert any(n.startswith("next batter") for n in seen)
 
 
+def test_card_note_does_not_repeat_no_pay():
+    t = {x["tactic"]: x for x in a.tactics(9, "bottom", 2, (0, 1, 0), -3)}
+    note = t["steal_3b"]["note"]
+    assert t["steal_3b"]["breakeven"] == 1.0 and note.startswith(a.NO_PAY)
+    assert a.card_note(note, False, True) == "count held fixed; pickoff and wild-pitch paths ignored"
+    assert a.card_note(note, True, True) == a.note_ja("count held fixed; pickoff and wild-pitch paths ignored")
+    assert a.card_note(note, False, False) == note
+    assert a.card_note(note, True, False) == t["steal_3b"]["note_ja"]
+
+
 def test_bunt_note_flags_count():
     t = {x["tactic"]: x for x in a.tactics(7, "bottom", 0, (1, 0, 0), -1, balls=1, strikes=2)}
     assert "pooled over all counts" in t["sacrifice_bunt"]["note"]
