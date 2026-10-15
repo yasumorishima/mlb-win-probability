@@ -1,0 +1,22 @@
+rows 733260 built in 4 s
+has_prev share 1.0 sp nan 0 dcur nan 0
+           d_prev       d_cur          sp           r        diff  runs_so_far
+count  733260.000  733260.000  733260.000  733260.000  733260.000   733260.000
+mean       -0.009      -0.011      -0.000       0.516      -0.163        4.458
+std         1.225       0.919       0.174       0.284       3.100        4.060
+min        -3.617      -3.429      -0.756       0.056     -10.000        0.000
+25%        -0.877      -0.603      -0.117       0.278      -2.000        1.000
+50%         0.003       0.000       0.001       0.519       0.000        4.000
+75%         0.858       0.585       0.115       0.759       1.000        7.000
+max         3.617       3.167       0.699       1.000      10.000       33.000
+2022 {"ENGINE": {"brier": 0.15394, "logloss": 0.46015, "gap35_own": 0.04728, "gap35_eng": 0.04728}, "mu": 0.5042412745415568, "RECAL": {"brier": 0.15352, "logloss": 0.45878, "gap35_own": 0.03181, "gap35_eng": 0.03055}, "TEAM": {"brier": 0.15113, "logloss": 0.45301, "gap35_own": 0.02587, "gap35_eng": 0.02999}, "SP": {"brier": 0.15267, "logloss": 0.45691, "gap35_own": 0.02861, "gap35_eng": 0.02973}, "INGAME": {"brier": 0.15353, "logloss": 0.45884, "gap35_own": 0.02987, "gap35_eng": 0.02885}, "FULL": {"brier": 0.15103, "logloss": 0.45286, "gap35_own": 0.02431, "gap35_eng": 0.0282}}
+2023 {"ENGINE": {"brier": 0.16149, "logloss": 0.4778, "gap35_own": 0.01462, "gap35_eng": 0.01462}, "mu": 0.4917797655768044, "RECAL": {"brier": 0.16161, "logloss": 0.4783, "gap35_own": -0.00535, "gap35_eng": -0.00786}, "TEAM": {"brier": 0.1596, "logloss": 0.47377, "gap35_own": 0.00326, "gap35_eng": -0.00702}, "SP": {"brier": 0.16082, "logloss": 0.47651, "gap35_own": 0.00091, "gap35_eng": -0.00832}, "INGAME": {"brier": 0.1617, "logloss": 0.47869, "gap35_own": -0.00815, "gap35_eng": -0.01064}, "FULL": {"brier": 0.15956, "logloss": 0.47388, "gap35_own": 0.00245, "gap35_eng": -0.00982}}
+2024 {"ENGINE": {"brier": 0.15764, "logloss": 0.4695, "gap35_own": 0.03832, "gap35_eng": 0.03832}, "mu": 0.5003625647988151, "RECAL": {"brier": 0.15739, "logloss": 0.46889, "gap35_own": 0.02299, "gap35_eng": 0.02097}, "TEAM": {"brier": 0.15543, "logloss": 0.46393, "gap35_own": 0.01276, "gap35_eng": 0.01928}, "SP": {"brier": 0.15682, "logloss": 0.46753, "gap35_own": 0.01767, "gap35_eng": 0.01991}, "INGAME": {"brier": 0.15735, "logloss": 0.46869, "gap35_own": 0.02234, "gap35_eng": 0.02024}, "FULL": {"brier": 0.15525, "logloss": 0.46343, "gap35_own": 0.01408, "gap35_eng": 0.0182}}
+2025 {"ENGINE": {"brier": 0.15566, "logloss": 0.46371, "gap35_own": 0.00774, "gap35_eng": 0.00774}, "mu": 0.49814522037558323, "RECAL": {"brier": 0.15559, "logloss": 0.46311, "gap35_own": -0.01833, "gap35_eng": -0.016}, "TEAM": {"brier": 0.15437, "logloss": 0.46061, "gap35_own": -0.02509, "gap35_eng": -0.01634}, "SP": {"brier": 0.15557, "logloss": 0.46331, "gap35_own": -0.02369, "gap35_eng": -0.01554}, "INGAME": {"brier": 0.15554, "logloss": 0.46286, "gap35_own": -0.01858, "gap35_eng": -0.0172}, "FULL": {"brier": 0.15437, "logloss": 0.46052, "gap35_own": -0.02474, "gap35_eng": -0.01714}}
+ENGINE  brier 0.15718  gap35 eng-band +0.0270 own-band +0.0270
+RECAL   brier 0.15703  gap35 eng-band +0.0069 own-band +0.0078
+TEAM    brier 0.15513  gap35 eng-band +0.0065 own-band +0.0042
+SP      brier 0.15647  gap35 eng-band +0.0064 own-band +0.0059
+INGAME  brier 0.15703  gap35 eng-band +0.0053 own-band +0.0064
+FULL    brier 0.15505  gap35 eng-band +0.0049 own-band +0.0040
+total 82 s
