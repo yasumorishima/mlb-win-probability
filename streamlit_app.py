@@ -40,8 +40,9 @@ st.set_page_config(
 # ============================================================
 
 lang = st.sidebar.radio("Language / 言語", ["EN", "JA"], horizontal=True)
-mode = st.sidebar.radio("Mode", ["⚾ WP Calculator", "🎬 Replay Mode"], horizontal=True,
-                        label_visibility="collapsed")
+MODES = ["⚾ WP Calculator", "🎬 Replay Mode"]
+mode = st.sidebar.radio("Mode", MODES, horizontal=True, label_visibility="collapsed",
+                        key="mode")
 
 _info = engine_info()
 _seasons = _info.get("train_seasons") or []
@@ -58,7 +59,8 @@ T = {
         "clear_live": "Clear",
         "load_live_state": "Load Live State",
         "auto_refresh": "Auto-refresh (30s)",
-        "next_refresh": "Next refresh in {s}s",
+        "next_refresh": "Refreshes every 30 s · last update {t} UTC",
+        "refresh_failed": "The last refresh failed; showing the state from {t} UTC.",
         "no_live_state": "Could not fetch live state. Game may not be active yet.",
         "no_games": "No games found for today.",
         "apply": "Apply to Analysis ↓",
@@ -148,7 +150,8 @@ T = {
         "clear_live": "クリア",
         "load_live_state": "ライブ状態を読み込む",
         "auto_refresh": "30秒ごとに自動更新",
-        "next_refresh": "次の更新まで {s}秒",
+        "next_refresh": "30 秒ごとに更新 · 最終更新 {t} UTC",
+        "refresh_failed": "直近の更新に失敗しました。{t} UTC の状態を表示しています。",
         "no_live_state": "ライブ状態を取得できませんでした。試合がまだ開始されていない可能性があります。",
         "no_games": "今日の試合は見つかりませんでした。",
         "apply": "↓ 分析に反映",
@@ -620,63 +623,80 @@ with st.container():
             if live_state:
                 st.session_state["live_state_cache"] = live_state
                 st.session_state["live_game_pk"] = selected_pk
+                st.session_state["live_last_refresh"] = time.time()
+                st.session_state["live_last_ok"] = time.time()
+                st.session_state["live_refresh_failed"] = False
             else:
                 st.warning(_["no_live_state"])
 
+        def _live_panel():
+            """The live state card and its Apply button. With auto-refresh on, this
+            runs as a fragment every 30 s, so the state is fetched again without
+            any click."""
+            if st.session_state.get("mode", MODES[0]) != MODES[0]:
+                return  # a timer tick that arrives after switching to Replay
+            # The timer ticks every 30 s; the attempt is stamped when it starts, so a
+            # slow fetch does not make the next tick skip. A click on Apply reruns
+            # this fragment too: it applies the state on screen and fetches nothing.
+            if (st.session_state.get("auto_refresh") and st.session_state.get("live_game_pk")
+                    and not st.session_state.get("apply_live")):
+                if time.time() - st.session_state.get("live_last_refresh", 0.0) >= 20:
+                    st.session_state["live_last_refresh"] = time.time()
+                    fresh = get_live_state(st.session_state["live_game_pk"])
+                    if fresh:
+                        st.session_state["live_state_cache"] = fresh
+                        st.session_state["live_last_ok"] = time.time()
+                    st.session_state["live_refresh_failed"] = not fresh
+                ok = datetime.fromtimestamp(st.session_state.get("live_last_ok", 0.0),
+                                            timezone.utc).strftime("%H:%M:%S")
+                key = "refresh_failed" if st.session_state.get("live_refresh_failed") else "next_refresh"
+                st.caption(_[key].format(t=ok))
+            cached = st.session_state.get("live_state_cache")
+            if cached:
+                inning_half = _["top_inning"] if cached["top_bottom"] == "top" else _["bot_inning"]
+                runners_str = (
+                    ("1B " if cached["runners"][0] else "")
+                    + ("2B " if cached["runners"][1] else "")
+                    + ("3B" if cached["runners"][2] else "")
+                    or "---"
+                )
+                count_str = ("" if cached.get("balls") is None
+                             else f" | {cached['balls']}-{cached['strikes']}")
+                st.markdown(
+                    '<div style="background:#141428;border:1px solid #00e5ff44;border-radius:10px;'
+                    'padding:14px;margin:8px 0;">'
+                    f'<span style="color:#00e5ff;font-weight:bold;font-size:1.1rem;">'
+                    f'{esc(cached["away_team"])} @ {esc(cached["home_team"])}</span>&nbsp;'
+                    f'<span style="color:#aaa;font-size:0.9rem;">{esc(cached["status"])}</span><br>'
+                    f'<span style="color:#e0e0e0;font-size:1.2rem;font-weight:bold;">'
+                    f'Away {cached["score_away"]} — Home {cached["score_home"]}</span>&nbsp;&nbsp;'
+                    f'<span style="color:#888;font-size:0.9rem;">{inning_half} {cached["inning"]} | '
+                    f'{cached["outs"]} {_["out_unit"]} | {runners_str}{count_str}</span><br>'
+                    f'<span style="color:#ccc;font-size:0.85rem;">🥎 {esc(cached["batter_name"] or "—")}'
+                    f' &nbsp; ⚾ {esc(cached["pitcher_name"] or "—")}</span></div>',
+                    unsafe_allow_html=True,
+                )
+
+                if not has_live_state(cached["status"]):
+                    st.caption(_["apply_none"])
+                elif st.button(_["apply"], key="apply_live", width="stretch"):
+                    st.session_state["_preset"] = {
+                        "inning": cached["inning"],
+                        "top_bottom": cached["top_bottom"],
+                        "outs": cached["outs"],
+                        "runners": cached["runners"],
+                        "score_diff": cached["score_diff"],
+                        "balls": cached.get("balls"),
+                        "strikes": cached.get("strikes"),
+                        "sched": cached.get("scheduled_innings", 9),
+                        "extra_runner": cached.get("extra_runner", True),
+                    }
+                    st.rerun()
+
         if auto_refresh and st.session_state.get("live_game_pk"):
-            if "live_last_refresh" not in st.session_state:
-                st.session_state["live_last_refresh"] = time.time()
-            elapsed = time.time() - st.session_state.get("live_last_refresh", 0)
-            if elapsed >= 30:
-                live_state = get_live_state(st.session_state["live_game_pk"])
-                if live_state:
-                    st.session_state["live_state_cache"] = live_state
-                st.session_state["live_last_refresh"] = time.time()
-                st.rerun()
-            else:
-                st.caption(_["next_refresh"].format(s=int(30 - elapsed)))
-
-        cached = st.session_state.get("live_state_cache")
-        if cached:
-            inning_half = _["top_inning"] if cached["top_bottom"] == "top" else _["bot_inning"]
-            runners_str = (
-                ("1B " if cached["runners"][0] else "")
-                + ("2B " if cached["runners"][1] else "")
-                + ("3B" if cached["runners"][2] else "")
-                or "---"
-            )
-            count_str = ("" if cached.get("balls") is None
-                         else f" | {cached['balls']}-{cached['strikes']}")
-            st.markdown(
-                '<div style="background:#141428;border:1px solid #00e5ff44;border-radius:10px;'
-                'padding:14px;margin:8px 0;">'
-                f'<span style="color:#00e5ff;font-weight:bold;font-size:1.1rem;">'
-                f'{esc(cached["away_team"])} @ {esc(cached["home_team"])}</span>&nbsp;'
-                f'<span style="color:#aaa;font-size:0.9rem;">{esc(cached["status"])}</span><br>'
-                f'<span style="color:#e0e0e0;font-size:1.2rem;font-weight:bold;">'
-                f'Away {cached["score_away"]} — Home {cached["score_home"]}</span>&nbsp;&nbsp;'
-                f'<span style="color:#888;font-size:0.9rem;">{inning_half} {cached["inning"]} | '
-                f'{cached["outs"]} {_["out_unit"]} | {runners_str}{count_str}</span><br>'
-                f'<span style="color:#ccc;font-size:0.85rem;">🥎 {esc(cached["batter_name"] or "—")}'
-                f' &nbsp; ⚾ {esc(cached["pitcher_name"] or "—")}</span></div>',
-                unsafe_allow_html=True,
-            )
-
-            if not has_live_state(cached["status"]):
-                st.caption(_["apply_none"])
-            elif st.button(_["apply"], key="apply_live", width="stretch"):
-                st.session_state["_preset"] = {
-                    "inning": cached["inning"],
-                    "top_bottom": cached["top_bottom"],
-                    "outs": cached["outs"],
-                    "runners": cached["runners"],
-                    "score_diff": cached["score_diff"],
-                    "balls": cached.get("balls"),
-                    "strikes": cached.get("strikes"),
-                    "sched": cached.get("scheduled_innings", 9),
-                    "extra_runner": cached.get("extra_runner", True),
-                }
-                st.rerun()
+            st.fragment(run_every=30)(_live_panel)()
+        else:
+            _live_panel()
 
     elif st.session_state.get("live_last_fetched"):
         st.info(_["no_games"])
