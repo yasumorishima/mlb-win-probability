@@ -46,6 +46,26 @@ TACTIC_NAMES = {
     "intentional_walk": ("Intentional walk", "敬遠"),
 }
 
+# Japanese for each "; "-separated part of an engine tactic note. A part that is
+# not listed here stays in English (tests check that every note the engine can
+# produce is covered).
+NOTE_JA = {
+    "count held fixed": "カウントは今のままで計算",
+    "pickoff and wild-pitch paths ignored": "牽制や暴投による進塁・アウトは含みません",
+    "no success rate makes this steal pay off": "成功率が何割でも、この盗塁は割に合いません",
+    "outcomes of PAs that ended on a bunt, including bunts for a hit":
+        "バントで終わった打席の結果（バントヒットを含む）",
+    "bunts fouled off are not in the sample": "ファウルになったバントは含みません",
+    "the bunt outcomes are pooled over all counts but compared with the WP at this count":
+        "バントの結果は全カウントをまとめたもので、このカウントでの勝率と比べています",
+    "next batter assumed league-average": "次の打者はリーグ平均として計算",
+}
+
+
+def note_ja(note: str) -> str:
+    parts = [x for x in note.split("; ") if x]
+    return "".join(NOTE_JA.get(x, x) + "。" for x in parts)
+
 # Plate-appearance outcome classes of the engine (wp_engine.CLASSES) shown in
 # the what-if panel. "OUT" is every ball-in-play out, double plays included.
 OUTCOMES = [
@@ -264,7 +284,7 @@ def tactics(inning, half, outs, runners, score_diff, sched=9, balls=None, strike
             "wp_if": None if t.wp_if is None else round(t.wp_if, 4),
             "delta": None if t.delta is None else round(t.delta, 4),
             "breakeven": None if t.breakeven is None else round(t.breakeven, 4),
-            "n": t.n, "note": note,
+            "n": t.n, "note": note, "note_ja": note_ja(note),
         })
     return out
 

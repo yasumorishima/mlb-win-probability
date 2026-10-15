@@ -91,6 +91,9 @@ assert at.checkbox(key="w_r1").value and at.checkbox(key="w_r2").value
 assert at.slider(key="w_diff").value == -1
 md = " ".join(m.value for m in at.markdown)
 assert ("送りバント" if lang == "JA" else "Sacrifice bunt") in md
+# the tactic notes follow the language
+assert ("ファウルになったバント" if lang == "JA" else "bunts fouled off") in md
+assert ("bunts fouled off" if lang == "JA" else "ファウルになったバント") not in md
 
 # the preset values survive another interaction (widgets keep them)
 at.selectbox(key="w_balls").set_value(3).run()

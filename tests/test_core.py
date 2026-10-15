@@ -119,6 +119,27 @@ def test_tactics_match_engine_and_name_the_side():
     assert ibb["delta"] == round(theirs["intentional_walk"].delta, 4)
 
 
+def test_every_tactic_note_has_japanese():
+    import re
+    seen = set()
+    for inning in (1, 5, 8, 9, 10):
+        for half in ("top", "bottom"):
+            for outs in (0, 1, 2):
+                for bases in [(b1, b2, b3) for b1 in (0, 1) for b2 in (0, 1) for b3 in (0, 1)]:
+                    for diff in (-3, -1, 0, 1, 3):
+                        for count in ((None, None), (0, 0), (3, 2), (0, 2)):
+                            for t in a.tactics(inning, half, outs, bases, diff,
+                                               balls=count[0], strikes=count[1]):
+                                seen.add(t["note"])
+                                assert not re.search("[A-Za-z]", t["note_ja"]), t
+                                assert t["note_ja"].count("。") == len(t["note"].split("; "))
+    # the engine's notes this sweep must reach: steal, no-pay steal, bunt (+count), walk
+    assert any(n.startswith("no success rate") for n in seen)
+    assert any("pooled over all counts" in n for n in seen)
+    assert any(n.startswith("count held fixed") for n in seen)
+    assert any(n.startswith("next batter") for n in seen)
+
+
 def test_bunt_note_flags_count():
     t = {x["tactic"]: x for x in a.tactics(7, "bottom", 0, (1, 0, 0), -1, balls=1, strikes=2)}
     assert "pooled over all counts" in t["sacrifice_bunt"]["note"]
