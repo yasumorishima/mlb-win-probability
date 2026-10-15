@@ -46,6 +46,9 @@ BASE = "https://statsapi.mlb.com/api"
 UA = {"User-Agent": "mlb-win-probability/2.0 (github.com/yasumorishima/mlb-win-probability)"}
 
 STEAL_TYPES = ("stolen_base_", "caught_stealing_", "pickoff_caught_stealing_")
+# pitch results that kill the ball (no steal can happen on them):
+# foul, foul bunt, foul tip on a bunt, foul pitchout, in play, hit by pitch
+DEAD_BALL_CODES = {"F", "L", "O", "R", "X", "D", "E", "H"}
 NON_PA_PREFIXES = ("caught_stealing", "pickoff", "stolen_base", "runner_double_play",
                    "other_out", "wild_pitch", "passed_ball", "balk", "defensive_indiff")
 
@@ -271,9 +274,12 @@ def parse_game(feed: dict, game_pk: int, date: str) -> tuple[list, list, list]:
             if et.startswith(("stolen_base_", "caught_stealing_")):
                 cand = k if events[k].get("isPitch") else before[k]["last_pitch"]
                 if cand is not None:
-                    going = bool((events[cand].get("details") or {}).get("runnerGoing"))
+                    cdet = events[cand].get("details") or {}
+                    going = bool(cdet.get("runnerGoing"))
+                    dead = (cdet.get("call") or {}).get("code") in DEAD_BALL_CODES
                     between = [events[j].get("type") for j in range(cand + 1, k)]
-                    if going and not any(t in ("stepoff", "pickoff", "no_pitch") for t in between):
+                    if going and not dead and \
+                            not any(t in ("stepoff", "pickoff", "no_pitch") for t in between):
                         pk_ = cand
             if pk_ is not None:
                 snap = before[pk_]
@@ -369,7 +375,7 @@ def _check_catchers(run_rows: list[dict], plays: list, game_pk: int) -> None:
     credited = {}
     for p in plays:
         for r in p.get("runners", []):
-            if r["details"].get("eventType", "").startswith("caught_stealing_"):
+            if (r["details"].get("eventType") or "").startswith("caught_stealing_"):
                 for c in r.get("credits", []):
                     if c["position"]["abbreviation"] == "C":
                         credited[(p["atBatIndex"], r["details"].get("playIndex"))] = c["player"]["id"]
@@ -419,14 +425,14 @@ def build_season(season: int, out: Path, until: str | None, workers: int,
                                              "caught_stealing_2b", "caught_stealing_3b"))]
     share = sum(r["on_pitch"] for r in sb_cs) / max(len(sb_cs), 1)
     print(f"{season}: steals/caught stealing of 2B/3B {len(sb_cs)}, on a pitch {share:.3f}", flush=True)
-    if season >= 2023 and share < 0.90:
+    if share < 0.90:
         sys.exit(f"{season}: only {share:.1%} of steals placed on a pitch - not writing")
     cs = [r for r in sb_cs if r["event_type"].startswith("caught_stealing_")]
     on_no_c = sum(1 for r in cs if r["on_pitch"] and "C" not in r["credited_positions"].split(","))
     off_with_c = sum(1 for r in cs if not r["on_pitch"] and "C" in r["credited_positions"].split(","))
     print(f"{season}: caught stealing {len(cs)}: on a pitch without a catcher credit {on_no_c}, "
           f"off a pitch with a catcher credit {off_with_c}", flush=True)
-    if season >= 2023 and (on_no_c + off_with_c) > 0.05 * max(len(cs), 1):
+    if (on_no_c + off_with_c) > 0.05 * max(len(cs), 1):
         sys.exit(f"{season}: on-pitch placement disagrees with catcher credits - not writing")
 
     out.mkdir(parents=True, exist_ok=True)
