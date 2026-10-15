@@ -11,9 +11,11 @@ Features use only information available before the game of the attempt:
   * the runner's sprint speed and the catcher's pop time / arm from the
     PREVIOUS season (Savant season tables cover the whole season, so the
     current season's values would include the games being predicted),
+  * the league success rate this season on earlier dates (the previous
+    season's rate until 300 attempts have been made),
   * running counts of attempts and successes for the runner, the catcher
     and the pitcher, over all earlier dates (strictly before the game date),
-    shrunk toward the league rate.
+    shrunk toward this season's league rate.
 
 Usage:
   python scripts/steal_features.py --states data/states --hf data/hf --out data/steal_attempts.parquet
@@ -29,6 +31,7 @@ import pandas as pd
 
 ATTEMPT_TYPES = {"stolen_base_2b", "stolen_base_3b", "caught_stealing_2b", "caught_stealing_3b"}
 SHRINK = {"runner": 10.0, "catcher": 30.0, "pitcher": 30.0}
+MIN_SEASON_ATTEMPTS = 300
 
 
 def load_attempts(states: Path) -> pd.DataFrame:
@@ -55,25 +58,39 @@ def _prior_counts(a: pd.DataFrame, who: str) -> pd.DataFrame:
 def add_features(a: pd.DataFrame, hf: Path) -> pd.DataFrame:
     a = a.copy()
     a["season"] = a.date.dt.year
-    # league rate before each date (expanding, strictly earlier dates)
-    by_day = a.groupby("date").success.agg(["size", "sum"]).sort_index()
-    cum_att = by_day["size"].cumsum() - by_day["size"]
-    cum_succ = by_day["sum"].cumsum() - by_day["sum"]
-    league = (cum_succ / cum_att).fillna(0.78)
-    a["league_rate_before"] = a.date.map(league)
+    # League success rate this season on earlier dates. The rate drifts
+    # from year to year (2023 .843, 2024 .833, 2025 .821), so a model
+    # without it is miscalibrated for the current season. Until a season
+    # has MIN_SEASON_ATTEMPTS earlier attempts, the previous season's
+    # full-year rate is used.
+    by_day = a.groupby(["season", "date"]).success.agg(["size", "sum"]).sort_index()
+    by_day["att_before"] = by_day.groupby(level=0)["size"].cumsum() - by_day["size"]
+    by_day["succ_before"] = by_day.groupby(level=0)["sum"].cumsum() - by_day["sum"]
+    full_year = a.groupby("season").success.mean()
+    rates = {}
+    for (season, date), r in by_day.iterrows():
+        if r.att_before >= MIN_SEASON_ATTEMPTS:
+            rates[date] = (r.succ_before / r.att_before, int(r.att_before), int(r.succ_before))
+        else:
+            prev = full_year.get(season - 1, 0.8)
+            rates[date] = (float(prev), int(r.att_before), int(r.succ_before))
+    a["season_rate_before"] = a.date.map(lambda d: rates[d][0])
+    a["season_att_before"] = a.date.map(lambda d: rates[d][1])
+    a["season_succ_before"] = a.date.map(lambda d: rates[d][2])
 
     for who in ("runner", "catcher", "pitcher"):
         pc = _prior_counts(a, who)
         a = a.merge(pc, on=[who, "date"], how="left")
         k = SHRINK[who]
-        a[f"{who}_att_before"] = a.pop("att_before").fillna(0)
-        succ = a.pop("succ_before").fillna(0)
+        a[f"{who}_att_before"] = a.pop("att_before").fillna(0).astype(int)
+        a[f"{who}_succ_before"] = a.pop("succ_before").fillna(0).astype(int)
+        succ = a[f"{who}_succ_before"]
         if who == "runner":
-            # runner's own success rate, shrunk to the league rate
-            a["runner_rate_shrunk"] = (succ + k * a.league_rate_before) / (a.runner_att_before + k)
+            # runner's own success rate, shrunk to this season's league rate
+            a["runner_rate_shrunk"] = (succ + k * a.season_rate_before) / (a.runner_att_before + k)
         else:
             # rate the runners achieved against this catcher / pitcher
-            a[f"{who}_allowed_rate_shrunk"] = (succ + k * a.league_rate_before) / (a[f"{who}_att_before"] + k)
+            a[f"{who}_allowed_rate_shrunk"] = (succ + k * a.season_rate_before) / (a[f"{who}_att_before"] + k)
 
     sprint = pd.read_parquet(hf / "sprint_speed.parquet")[["player_id", "season", "sprint_speed"]]
     sprint = sprint.groupby(["player_id", "season"], as_index=False).sprint_speed.mean()
@@ -92,7 +109,7 @@ def add_features(a: pd.DataFrame, hf: Path) -> pd.DataFrame:
 
 
 FEATURES = [
-    "to_third", "outs", "balls", "strikes", "diseng", "late", "close", "lefty",
+    "season_rate_logit", "to_third", "outs", "balls", "strikes", "diseng", "late", "close", "lefty",
     "runner_sprint_prev", "runner_sprint_missing",
     "runner_rate_shrunk", "runner_att_log",
     "catcher_pop_prev", "catcher_pop_missing", "catcher_arm_prev",
@@ -103,6 +120,8 @@ FEATURES = [
 def design(a: pd.DataFrame, fill: dict | None = None) -> tuple[pd.DataFrame, dict]:
     """Model matrix. `fill` (means for missing values) comes from training rows."""
     X = pd.DataFrame(index=a.index)
+    r = a.season_rate_before.clip(0.01, 0.99)
+    X["season_rate_logit"] = np.log(r / (1 - r))
     X["to_third"] = a.to_third
     X["outs"] = a.outs_before
     X["balls"] = a.balls

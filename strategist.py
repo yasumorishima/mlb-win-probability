@@ -70,10 +70,18 @@ the player facts give a concrete reason, and state that reason in `departure_rea
 - "none" (play it straight) is a valid and frequent answer.
 """
 
-SYSTEM_STEAL = """You estimate whether a stolen-base attempt in an MLB game succeeds. \
-You get the situation and facts about the runner, pitcher and catcher, all measured \
-before this game. Use only those facts. Give the probability that this attempt is \
-successful (runner safe, no caught stealing or pickoff on the play)."""
+SYSTEM_STEAL = """You estimate the probability that a stolen-base attempt in an MLB \
+game succeeds. The input gives the date, how the attempts were selected, the league \
+success rate this season before that date, the situation, and facts about the runner, \
+pitcher and catcher measured before that date (previous-season Statcast measures with \
+league mean and sd, and attempt records).
+
+You may use anything you know about these players and teams up to the day before the \
+given date. Do not use knowledge of this game or of anything after it. If a statistical \
+model's estimate is included, it already uses the listed facts; adjust it only for what \
+it cannot see.
+
+Return p_success between 0 and 1 and a one- or two-sentence reason."""
 
 
 def _client():
@@ -101,14 +109,16 @@ def _schema(model: type[BaseModel]) -> dict:
     return s
 
 
-def request_params(kind: str, payload: dict) -> dict:
-    """Messages API parameters (shared by live calls and the Batches API)."""
+def request_params(kind: str, payload: dict, effort: str = EFFORT) -> dict:
+    """Messages API parameters (shared by live calls and the Batches API).
+    No server-side fallback here: the Batches API rejects it, and a fallback
+    would answer with a different model."""
     system, model = (SYSTEM_ADVICE, Advice) if kind == "advice" else (SYSTEM_STEAL, StealEstimate)
     return {
         "model": MODEL,
         "max_tokens": 4000,
         "system": [{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
-        "output_config": {"effort": EFFORT,
+        "output_config": {"effort": effort,
                           "format": {"type": "json_schema", "schema": _schema(model)}},
         "messages": [{"role": "user",
                       "content": json.dumps(payload, ensure_ascii=False, sort_keys=True)}],
@@ -124,9 +134,14 @@ def parse_response(kind: str, message) -> BaseModel | None:
         return None
     model = Advice if kind == "advice" else StealEstimate
     try:
-        return model.model_validate_json(text)
+        out = model.model_validate_json(text)
     except ValidationError:
         return None
+    if isinstance(out, StealEstimate) and not 0.0 <= out.p_success <= 1.0:
+        return None
+    if isinstance(out, Advice) and not 0.0 <= out.confidence <= 1.0:
+        return None
+    return out
 
 
 def _call(kind: str, payload: dict):

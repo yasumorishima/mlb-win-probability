@@ -1,0 +1,120 @@
+{
+ "B": {
+  "date": "2026-06-01",
+  "population": "Attempts to steal second or third base that happened on a pitch, in MLB regular-season games. Steals of home, pickoffs and attempts not on a pitch are excluded. Success = stolen base credited; caught stealing (including on an error) = failure.",
+  "league_this_season_before_today": {
+   "attempts": 1479,
+   "successes": 1177,
+   "success_rate_used": 0.796,
+   "note": "rate of earlier dates this season; previous season's rate until 300 attempts"
+  },
+  "situation": {
+   "target_base": "second",
+   "outs": 2,
+   "balls": 0,
+   "strikes": 1,
+   "pickoff_attempts_and_stepoffs_this_PA_before_this_pitch": 0,
+   "inning": 5,
+   "half": "top",
+   "batting_team_score_minus_fielding_team_score": 5,
+   "pitcher_throws": "R"
+  },
+  "teams": {
+   "offense": "Detroit Tigers",
+   "defense": "Tampa Bay Rays"
+  },
+  "runner": {
+   "name": "Colt Keith",
+   "sprint_speed_previous_season_ft_per_s": 28.0,
+   "attempts_since_2021_before_today": 11,
+   "successes_since_2021_before_today": 9
+  },
+  "pitcher": {
+   "name": "Trevor Martin",
+   "attempts_against_since_2021_before_today": 1,
+   "successes_against_since_2021_before_today": 1
+  },
+  "catcher": {
+   "name": "Nick Fortes",
+   "pop_time_to_second_previous_season_s": 1.93,
+   "arm_strength_previous_season_mph": 82.5,
+   "attempts_against_since_2021_before_today": 351,
+   "successes_against_since_2021_before_today": 296
+  },
+  "league_reference_previous_season": {
+   "sprint_speed_ft_per_s": {
+    "mean": 27.34,
+    "sd": 1.35
+   },
+   "pop_time_2b_s": {
+    "mean": 1.96,
+    "sd": 0.05
+   },
+   "arm_strength_mph": {
+    "mean": 82.38,
+    "sd": 3.09
+   }
+  }
+ },
+ "C": {
+  "date": "2026-06-01",
+  "population": "Attempts to steal second or third base that happened on a pitch, in MLB regular-season games. Steals of home, pickoffs and attempts not on a pitch are excluded. Success = stolen base credited; caught stealing (including on an error) = failure.",
+  "league_this_season_before_today": {
+   "attempts": 1479,
+   "successes": 1177,
+   "success_rate_used": 0.796,
+   "note": "rate of earlier dates this season; previous season's rate until 300 attempts"
+  },
+  "situation": {
+   "target_base": "second",
+   "outs": 2,
+   "balls": 0,
+   "strikes": 1,
+   "pickoff_attempts_and_stepoffs_this_PA_before_this_pitch": 0,
+   "inning": 5,
+   "half": "top",
+   "batting_team_score_minus_fielding_team_score": 5,
+   "pitcher_throws": "R"
+  },
+  "teams": {
+   "offense": "Detroit Tigers",
+   "defense": "Tampa Bay Rays"
+  },
+  "runner": {
+   "name": "Colt Keith",
+   "sprint_speed_previous_season_ft_per_s": 28.0,
+   "attempts_since_2021_before_today": 11,
+   "successes_since_2021_before_today": 9
+  },
+  "pitcher": {
+   "name": "Trevor Martin",
+   "attempts_against_since_2021_before_today": 1,
+   "successes_against_since_2021_before_today": 1
+  },
+  "catcher": {
+   "name": "Nick Fortes",
+   "pop_time_to_second_previous_season_s": 1.93,
+   "arm_strength_previous_season_mph": 82.5,
+   "attempts_against_since_2021_before_today": 351,
+   "successes_against_since_2021_before_today": 296
+  },
+  "league_reference_previous_season": {
+   "sprint_speed_ft_per_s": {
+    "mean": 27.34,
+    "sd": 1.35
+   },
+   "pop_time_2b_s": {
+    "mean": 1.96,
+    "sd": 0.05
+   },
+   "arm_strength_mph": {
+    "mean": 82.38,
+    "sd": 3.09
+   }
+  },
+  "statistical_model_estimate": {
+   "p_success": 0.81,
+   "what_it_is": "L2 logistic regression on the situation, the league rate, the previous-season Savant measures and the shrunk attempt records above; trained on attempts from 2023-03-30 to the day before 2026-07-01."
+  }
+ }
+}
