@@ -20,7 +20,9 @@ numbers. This module looks them up and shapes them for the Streamlit app
   (strategist.advise)
 
 Every player is league-average to the engine; nothing here adjusts for
-who is batting or pitching.
+who is batting or pitching. For regular-season games with known teams,
+team_layer_wp adds the pre-registered team-strength layer
+(research/wp_layer, team_layer.py) on top of the engine.
 """
 
 from __future__ import annotations
@@ -32,6 +34,7 @@ from pathlib import Path
 
 import numpy as np
 
+import team_layer
 from wp_engine import END, MAX_RUNS, Engine, _state
 
 TABLES_PATH = Path(__file__).resolve().parent / "engine_tables.json"
@@ -162,6 +165,36 @@ def state_wp(inning, half, outs, runners, score_diff, sched=9, extra_runner=True
     if outs == 3:
         return float(eng._wp_after(inning, half, END, 0, score_diff, sched))
     return eng.wp(inning, half, outs, r, score_diff, sched)
+
+
+def team_layer_wp(inning, half, outs, runners, score_diff, sched, extra_runner,
+                  home_id, away_id, game_date, game_type) -> dict:
+    """Home WP of the team-strength layer for a game state.
+
+    The layer was fitted and tested on the state before each plate
+    appearance of regular-season games, so it takes the engine's WP without
+    the count (state_wp) and is only applied to game type "R". Returns
+    {"applied": False, "reason": ...} when it does not apply or the run
+    differentials cannot be read."""
+    if game_type != "R":
+        return {"applied": False, "reason": "not_regular_season"}
+    if not (home_id and away_id and game_date):
+        return {"applied": False, "reason": "unknown_teams"}
+    try:
+        s = team_layer.strengths(int(home_id), int(away_id), str(game_date))
+    except ValueError:
+        s = None
+    if s is None:
+        return {"applied": False, "reason": "no_team_data"}
+    p = state_wp(inning, half, outs, runners, score_diff, sched, extra_runner)
+    if outs == 3:      # the half has just ended: the layer's state is the next half's start
+        if half == "top":
+            half, outs = "bottom", 0
+        else:
+            inning, half, outs = inning + 1, "top", 0
+    t = team_layer.team_wp(p, inning, half, outs, sched, s["d_prev"], s["d_cur"])
+    return {"applied": True, "engine_wp": p, "team_wp": t,
+            "d_prev": s["d_prev"], "d_cur": s["d_cur"], "teams": s["teams"]}
 
 
 def leverage_index(inning, half, outs, runners, score_diff, sched=9, extra_runner=True) -> float:

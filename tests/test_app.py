@@ -56,6 +56,19 @@ def fake_state(pk):
 live_feed.get_todays_games = fake_games
 live_feed.get_live_state = fake_state
 
+# the team layer, without the network: fixed run differentials
+import team_layer
+team_layer.strengths = lambda h, a, d: {"d_prev": 0.5, "d_cur": 0.25, "teams": {}}
+LIVE.update({"home_id": 1, "away_id": 2, "game_date": "2026-07-01", "game_type": "R"})
+TEAM_WORD = "Team-adjusted" if lang == "EN" else "チーム力込み"
+PLAY = {"inning": 6, "top_bottom": "bottom", "outs": 0, "runners": (0, 0, 0), "score_diff": -1,
+        "outs_after": 1, "runners_after": (0, 0, 0), "runs_on_play": 0, "home_score": 1,
+        "away_score": 2, "scheduled_innings": 9, "extra_runner": True, "description": "K",
+        "event": "Strikeout", "batter": "b", "pitcher": "p", "home_team": "H", "away_team": "A",
+        "pitch_data": None, "hit_data": None, "balls": 0, "strikes": 0,
+        "home_id": 1, "away_id": 2, "game_date": "2026-07-01", "game_type": "R"}
+live_feed.get_game_plays = lambda pk: [dict(PLAY)]
+
 import streamlit
 fragments = []
 _real_fragment = streamlit.fragment
@@ -175,6 +188,10 @@ at.button(key="fetch_games").click().run()
 at.button(key="load_live").click().run()
 assert not at.exception, at.exception
 assert len(fetches) == 1 and any(b.key == "apply_live" for b in at.button)
+import analysis
+_t = analysis.team_layer_wp(5, "top", 1, (1, 0, 0), 1, 9, True, 1, 2, "2026-07-01", "R")
+assert any(TEAM_WORD in c.value and f"{_t['team_wp'] * 100:.1f}%" in c.value
+           and f"{_t['engine_wp'] * 100:.1f}%" in c.value for c in at.caption),     [c.value for c in at.caption]
 assert fragments == []                         # auto-refresh off: no timer
 at.checkbox(key="auto_refresh").check().run()
 assert not at.exception, at.exception
@@ -203,9 +220,23 @@ at.run()
 assert len(fetches) == 3                       # off: no refetch
 assert len(fragments) == n_frag                # and no timer
 
+# a postseason game: the team layer is not used, and the card says so
+LIVE.update({"status": "In Progress", "game_type": "F"})
+at.button(key="load_live").click().run()
+assert not at.exception, at.exception
+cap = [c.value for c in at.caption]
+assert not any(TEAM_WORD in c for c in cap), cap
+assert any(("regular-season" if lang == "EN" else "レギュラーシーズン") in c for c in cap), cap
+
 # replay mode renders without network until a button is pressed
 at.sidebar.radio[1].set_value("🎬 Replay Mode").run()
 assert not at.exception, at.exception
+# a replayed regular-season play shows the team layer for the state before it
+[b for b in at.button if b.label == "Load Games"][0].click().run()
+[b for b in at.button if b.label == "▶ Load Replay"][0].click().run()
+assert not at.exception, at.exception
+_r = analysis.team_layer_wp(6, "bottom", 0, (0, 0, 0), -1, 9, True, 1, 2, "2026-07-01", "R")
+assert any(TEAM_WORD in c.value and f"{_r['team_wp'] * 100:.1f}%" in c.value for c in at.caption),     [c.value for c in at.caption]
 print("OK", lang, "key" if with_key else "nokey")
 """
 

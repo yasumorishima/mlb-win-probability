@@ -95,6 +95,16 @@ def _game_rules(data: dict) -> tuple[int, bool]:
     return sched, season >= 2020 and game.get("type") in AUTO_RUNNER_GAME_TYPES
 
 
+def _game_ids(data: dict) -> dict:
+    """Team ids, official date and game type, for the team layer (team_layer.py)."""
+    game_data = data.get("gameData", {})
+    teams = game_data.get("teams", {})
+    return {"home_id": teams.get("home", {}).get("id"),
+            "away_id": teams.get("away", {}).get("id"),
+            "game_date": game_data.get("datetime", {}).get("officialDate"),
+            "game_type": game_data.get("game", {}).get("type")}
+
+
 def _half_start(inning: int, sched: int, extra_runner: bool) -> tuple[int, int, int]:
     return (0, 1, 0) if extra_runner and inning > sched else (0, 0, 0)
 
@@ -208,6 +218,7 @@ def parse_live_state(data: dict) -> dict:
         "strikes": strikes,
         "pitch_data": pitch_data,
         "hit_data": hit_data,
+        **_game_ids(data),
     }
 
 
@@ -235,6 +246,7 @@ def parse_game_plays(data: dict) -> list[dict]:
     home_team = teams.get("home", {}).get("name", "Home")
     away_team = teams.get("away", {}).get("name", "Away")
     sched, extra_runner = _game_rules(data)
+    ids = _game_ids(data)
 
     plays = []
     prev_half = None
@@ -289,6 +301,7 @@ def parse_game_plays(data: dict) -> list[dict]:
             "hit_data": hit_data,
             "balls": count_data["balls"],
             "strikes": count_data["strikes"],
+            **ids,
         })
         outs, bases = outs_after, bases_after
         prev_home, prev_away = home_score, away_score
@@ -315,8 +328,10 @@ def get_game_plays(game_pk: int) -> list[dict]:
 
 
 def live_wp(state: dict) -> dict:
-    """Live state + win probability analysis (analysis.full_analysis)."""
-    from analysis import full_analysis
+    """Live state + win probability analysis (analysis.full_analysis), and
+    the team layer (analysis.team_layer_wp) under "team_layer" while the game
+    is in progress."""
+    from analysis import full_analysis, team_layer_wp
 
     status = state["status"]
     if status in ("Scheduled", "Pre-Game", "Warmup") or status.startswith("Delayed Start"):
@@ -336,7 +351,12 @@ def live_wp(state: dict) -> dict:
         state["score_diff"], state["scheduled_innings"],
         state["balls"], state["strikes"], extra_runner=state["extra_runner"],
     )
-    return {**state, **analysis}
+    team = team_layer_wp(
+        state["inning"], state["top_bottom"], state["outs"], state["runners"],
+        state["score_diff"], state["scheduled_innings"], state["extra_runner"],
+        state.get("home_id"), state.get("away_id"), state.get("game_date"), state.get("game_type"),
+    )
+    return {**state, **analysis, "team_layer": team}
 
 
 def get_live_wp(game_pk: int) -> dict | None:

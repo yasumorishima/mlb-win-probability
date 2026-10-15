@@ -278,7 +278,12 @@ def games_today(
     summary="Live Win Probability for a Game",
     description=(
         "Fetch the live game state from the MLB Stats API and compute win probability, "
-        "Leverage Index and tactics.\n\nUse `/games/today` to get valid `gamePk` values."
+        "Leverage Index and tactics.\n\nWhile a regular-season game is in progress, "
+        "`team_layer` also gives the home win probability of the pre-registered "
+        "team-strength layer (research/wp_layer) for the current bases, outs and score "
+        "(the count is left out, as in the layer's fit), with the engine's value for the same state and the two teams' run "
+        "differentials per game. Otherwise `team_layer.applied` is false with a reason."
+        "\n\nUse `/games/today` to get valid `gamePk` values."
     ),
 )
 def wp_live(game_pk: int):
