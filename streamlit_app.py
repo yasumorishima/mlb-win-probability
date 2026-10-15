@@ -633,7 +633,9 @@ SCHED_OPTIONS = [9, 7]
 if "_preset" in st.session_state:
     p = st.session_state.pop("_preset")
     st.session_state["w_inning"] = min(max(int(p["inning"]), 1), INNINGS[-1])
-    st.session_state["w_half"] = p["top_bottom"]
+    st.session_state["half"] = p["top_bottom"]
+    for k in ("w_half_EN", "w_half_JA"):
+        st.session_state.pop(k, None)
     st.session_state["w_outs"] = int(p["outs"])
     st.session_state["w_diff"] = int(max(-10, min(10, p["score_diff"])))
     st.session_state["w_r1"], st.session_state["w_r2"], st.session_state["w_r3"] = (
@@ -642,6 +644,13 @@ if "_preset" in st.session_state:
     st.session_state["w_strikes"] = int(p.get("strikes") or 0)
     st.session_state["w_sched"] = p.get("sched", 9) if p.get("sched", 9) in SCHED_OPTIONS else 9
 st.session_state.setdefault("w_diff", 0)
+# The half selector shows translated labels; the frontend keeps the labels of a
+# keyed widget, so each language gets its own widget and "half" carries the value.
+st.session_state.setdefault("half", "top")
+HALF_KEY = f"w_half_{lang}"
+st.session_state.pop("w_half_JA" if lang == "EN" else "w_half_EN", None)
+if HALF_KEY not in st.session_state:
+    st.session_state[HALF_KEY] = st.session_state["half"]
 
 st.markdown(f"## {_['game_state']}")
 
@@ -653,9 +662,10 @@ with col_settings:
         inning = st.selectbox(_["inning"], INNINGS, key="w_inning")
     with c2:
         top_bottom = st.selectbox(
-            _["half"], ["top", "bottom"], key="w_half",
+            _["half"], ["top", "bottom"], key=HALF_KEY,
             format_func=lambda x: _["half_top"] if x == "top" else _["half_bottom"],
         )
+        st.session_state["half"] = top_bottom
     with c3:
         outs = st.selectbox(_["outs_label"], [0, 1, 2], key="w_outs")
 

@@ -56,7 +56,8 @@ else:
 at.button(key="preset_rally_7th").click().run()
 assert not at.exception, at.exception
 assert at.selectbox(key="w_inning").value == 7
-assert at.selectbox(key="w_half").value == "bottom"
+assert at.selectbox(key="w_half_" + lang).value == "bottom"
+assert at.selectbox(key="w_half_" + lang).options == (["表", "裏"] if lang == "JA" else ["Top", "Bottom"])
 assert at.checkbox(key="w_r1").value and at.checkbox(key="w_r2").value
 assert at.slider(key="w_diff").value == -1
 md = " ".join(m.value for m in at.markdown)
@@ -66,6 +67,14 @@ assert ("送りバント" if lang == "JA" else "Sacrifice bunt") in md
 at.selectbox(key="w_balls").set_value(3).run()
 assert not at.exception, at.exception
 assert at.selectbox(key="w_inning").value == 7
+
+# the half survives a language switch
+other = "EN" if lang == "JA" else "JA"
+at.sidebar.radio[0].set_value(other).run()
+assert not at.exception, at.exception
+assert at.selectbox(key="w_half_" + other).value == "bottom"
+at.sidebar.radio[0].set_value(lang).run()
+assert at.selectbox(key="w_half_" + lang).value == "bottom"
 
 if with_key:
     at.button(key="ask_coach").click().run()
