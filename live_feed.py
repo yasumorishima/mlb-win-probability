@@ -74,6 +74,10 @@ GAME_OVER_PREFIXES = ("Final", "Game Over", "Completed Early")
 NO_STATE_PREFIXES = GAME_OVER_PREFIXES + ("Postponed", "Cancelled", "Suspended")
 
 
+def is_not_started(status: str) -> bool:
+    return status in ("Scheduled", "Pre-Game", "Warmup") or status.startswith("Delayed Start")
+
+
 def is_game_over_status(status: str) -> bool:
     return status.startswith(GAME_OVER_PREFIXES)
 
@@ -334,7 +338,7 @@ def live_wp(state: dict) -> dict:
     from analysis import full_analysis, team_layer_wp
 
     status = state["status"]
-    if status in ("Scheduled", "Pre-Game", "Warmup") or status.startswith("Delayed Start"):
+    if is_not_started(status):
         return {**state, "status_note": "Game not yet started", "win_probability": None}
     if status.startswith(("Postponed", "Cancelled", "Suspended")):
         return {**state, "status_note": status, "win_probability": None}

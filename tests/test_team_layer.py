@@ -86,8 +86,10 @@ def fake_fetch(calls, fail_first=False):
 @pytest.fixture(autouse=True)
 def clear_cache():
     tl._CACHE.clear()
+    tl._FAILED.clear()
     yield
     tl._CACHE.clear()
+    tl._FAILED.clear()
 
 
 def test_strengths_follow_the_training_rules(monkeypatch):
@@ -116,8 +118,35 @@ def test_no_previous_season_or_failed_read_gives_none(monkeypatch):
     calls = []
     monkeypatch.setattr(tl, "_fetch", fake_fetch(calls, fail_first=True))
     assert tl.strengths(1, 2, "2026-04-10") is None          # the read failed
-    assert tl.strengths(1, 2, "2026-04-10") is not None      # not cached: tried again
+    n = len(calls)
+    assert tl.strengths(1, 2, "2026-04-10") is None          # within RETRY_AFTER: no new read
+    assert len(calls) == n
+    monkeypatch.setattr(tl, "RETRY_AFTER", 0)
+    assert tl.strengths(1, 2, "2026-04-10") is not None      # the failure was not kept
     assert tl.strengths(1, 99, "2026-04-10") is None         # team 99 has no last season
+    assert tl.strengths(1, 2, "2021-06-01") is None          # before the fitted seasons
+
+
+def test_current_season_is_read_again_after_an_hour(monkeypatch):
+    calls = []
+    monkeypatch.setattr(tl, "_fetch", fake_fetch(calls))
+    assert tl._games_cached(2026, "2026-04-09", now_year=2026) is not None
+    assert tl._games_cached(2025, "2025-12-31", now_year=2026) is not None
+    assert tl._games_cached(2026, "2026-04-09", now_year=2026) is not None
+    assert len(calls) == 2                                    # both cached
+    monkeypatch.setattr(tl, "CURRENT_TTL", -1)
+    tl._games_cached(2026, "2026-04-09", now_year=2026)
+    tl._games_cached(2025, "2025-12-31", now_year=2026)
+    assert len(calls) == 3                                    # only the current season again
+    assert all("fields=" in c for c in calls)
+
+
+def test_unexpected_shape_gives_none(monkeypatch):
+    for bad in ({"dates": "x"}, {"dates": [{"date": "2025-04-01", "games": [{"season": "2025",
+                 "status": {"codedGameState": "F"}, "gamePk": 1, "teams": None}]}]}):
+        tl._CACHE.clear(); tl._FAILED.clear()
+        monkeypatch.setattr(tl, "_fetch", lambda url, bad=bad: bad)
+        assert tl.strengths(1, 2, "2026-04-10") is None
 
 
 def test_final_game_without_score_is_not_guessed(monkeypatch):
@@ -145,3 +174,13 @@ def test_team_layer_wp(monkeypatch):
     e = analysis.team_layer_wp(5, "top", 3, (0, 0, 0), 1, 9, True, 1, 2, "2026-07-01", "R")
     assert e["team_wp"] == tl.team_wp(analysis.state_wp(5, "top", 3, (0, 0, 0), 1, 9, True),
                                       5, "bottom", 0, 9, 0.5, -0.2)
+    e = analysis.team_layer_wp(5, "bottom", 3, (0, 0, 0), 1, 9, True, 1, 2, "2026-07-01", "R")
+    assert e["team_wp"] == tl.team_wp(analysis.state_wp(5, "bottom", 3, (0, 0, 0), 1, 9, True),
+                                      6, "top", 0, 9, 0.5, -0.2)
+    # the engine input is clipped to +-15 runs, as in the fit
+    big = analysis.team_layer_wp(2, "top", 0, (0, 0, 0), -18, 9, True, 1, 2, "2026-07-01", "R")
+    assert big["engine_wp"] == analysis.state_wp(2, "top", 0, (0, 0, 0), -15, 9, True)
+    assert analysis.team_layer_wp(*args[:9], "2021-07-01", "R")["reason"] == "before_fitted_seasons"
+    # a failure inside the lookup becomes "no data", never an exception
+    monkeypatch.setattr(tl, "strengths", lambda h, a, d: {}["missing"])
+    assert analysis.team_layer_wp(*args, "R")["reason"] == "no_team_data"

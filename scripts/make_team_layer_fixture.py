@@ -24,5 +24,5 @@ idx += list(np.flatnonzero((d.scheduled_innings == 7).to_numpy())[:2])
 rows = [{"p_engine": float(r.p_eng), "inning": int(r.inning), "half": r.half, "outs": int(r.outs),
          "sched": int(r.scheduled_innings), "d_prev": float(r.d_prev), "d_cur": float(r.d_cur),
          "p_team": float(r.p_team)} for r in d.iloc[idx].itertuples()]
-Path("tests/data/team_layer_rows.json").write_text(json.dumps(rows, indent=0))
+Path("tests/fixtures/team_layer_rows.json").write_text(json.dumps(rows, indent=0))
 print(len(rows), sum(r["inning"] > r["sched"] for r in rows), sum(r["sched"] == 7 for r in rows))

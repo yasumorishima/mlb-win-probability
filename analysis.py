@@ -180,13 +180,16 @@ def team_layer_wp(inning, half, outs, runners, score_diff, sched, extra_runner,
         return {"applied": False, "reason": "not_regular_season"}
     if not (home_id and away_id and game_date):
         return {"applied": False, "reason": "unknown_teams"}
+    if str(game_date)[:4] < str(team_layer.FIRST_SEASON):
+        return {"applied": False, "reason": "before_fitted_seasons"}
     try:
         s = team_layer.strengths(int(home_id), int(away_id), str(game_date))
-    except ValueError:
+    except Exception:     # the extra line must never break the page or the API
         s = None
     if s is None:
         return {"applied": False, "reason": "no_team_data"}
-    p = state_wp(inning, half, outs, runners, score_diff, sched, extra_runner)
+    # the layer's engine input clipped the score difference to +-15 (layer_features.engine_wp)
+    p = state_wp(inning, half, outs, runners, max(-15, min(15, score_diff)), sched, extra_runner)
     if outs == 3:      # the half has just ended: the layer's state is the next half's start
         if half == "top":
             half, outs = "bottom", 0

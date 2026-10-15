@@ -282,7 +282,8 @@ def games_today(
         "`team_layer` also gives the home win probability of the pre-registered "
         "team-strength layer (research/wp_layer) for the current bases, outs and score "
         "(the count is left out, as in the layer's fit), with the engine's value for the same state and the two teams' run "
-        "differentials per game. Otherwise `team_layer.applied` is false with a reason."
+        "differentials per game. Otherwise `team_layer.applied` is false with a reason; before the game starts and "
+        "after it ends there is no `team_layer`."
         "\n\nUse `/games/today` to get valid `gamePk` values."
     ),
 )
