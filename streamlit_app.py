@@ -25,9 +25,16 @@ from analysis import (
     get_advice,
     has_api_key,
     re24_table,
+    team_layer_wp,
     wp_after_play,
 )
-from live_feed import get_game_plays, get_live_state, get_todays_games, has_live_state
+from live_feed import (
+    get_game_plays,
+    get_live_state,
+    get_todays_games,
+    has_live_state,
+    is_not_started,
+)
 
 st.set_page_config(
     page_title="MLB Win Probability",
@@ -141,6 +148,14 @@ T = {
         "scenario_name_key": "name",
         "replay_caption": "Select any past MLB game and replay it play-by-play with WP updates.",
         "wp_change": "WP (home): {b:.1f}% → {a:.1f}% (WPA {d:+.1f} pts)",
+        "team_wp": ("Team-adjusted home WP from the bases, outs and score (balls and strikes not used): **{t:.1f}%** "
+                    "(engine {e:.1f}%). Run differential per game, home − away: "
+                    "last season {dp:+.2f}, this season so far {dc:+.2f}."),
+        "team_wp_na_type": "The team-strength adjustment is used only for regular-season games.",
+        "team_wp_na_data": ("The team-strength adjustment is not available "
+                            "(the teams' results could not be read)."),
+        "team_wp_na_ids": "The team-strength adjustment is not available (the teams are not known).",
+        "team_wp_na_season": "The team-strength adjustment is used from the 2022 season on.",
     },
     "JA": {
         "title": "MLB 勝利確率エンジン",
@@ -228,6 +243,12 @@ T = {
         "scenario_name_key": "name_ja",
         "replay_caption": "過去の試合を選んで1プレーずつ勝利確率をリプレイ",
         "wp_change": "勝利確率（ホーム）: {b:.1f}% → {a:.1f}%（WPA {d:+.1f} pt）",
+        "team_wp": ("チーム力込みのホームの勝利確率（塁・アウト・点差から計算、ボールとストライクは使わない）：**{t:.1f}%**（エンジン {e:.1f}%）。"
+                    "1 試合あたりの得失点差（ホーム − ビジター）：前年 {dp:+.2f}・今季ここまで {dc:+.2f}"),
+        "team_wp_na_type": "チーム力の補正はレギュラーシーズンの試合だけに使います。",
+        "team_wp_na_data": "チーム力の補正は使えません（両チームの成績を読めませんでした）。",
+        "team_wp_na_ids": "チーム力の補正は使えません（対戦チームを特定できません）。",
+        "team_wp_na_season": "チーム力の補正は 2022 年のシーズンから使います。",
     },
 }
 
@@ -274,6 +295,18 @@ def diamond_svg(runners, label: str) -> str:
         f'<text x="70" y="138" fill="#666" font-size="10" text-anchor="middle">{esc(label)}</text>'
         '</svg>'
     )
+
+
+def team_line(s: dict) -> str:
+    """The team layer's line (research/wp_layer) for a live or replayed state."""
+    t = team_layer_wp(s["inning"], s["top_bottom"], s["outs"], s["runners"], s["score_diff"],
+                      s.get("scheduled_innings", 9), s.get("extra_runner", True),
+                      s.get("home_id"), s.get("away_id"), s.get("game_date"), s.get("game_type"))
+    if t["applied"]:
+        return _["team_wp"].format(t=t["team_wp"] * 100, e=t["engine_wp"] * 100,
+                                   dp=t["d_prev"], dc=t["d_cur"])
+    return _[{"not_regular_season": "team_wp_na_type", "unknown_teams": "team_wp_na_ids",
+              "before_fitted_seasons": "team_wp_na_season"}.get(t["reason"], "team_wp_na_data")]
 
 
 def wp_gauge(wp: float, title: str | None = None) -> go.Figure:
@@ -540,6 +573,7 @@ if mode == "🎬 Replay Mode":
                 unsafe_allow_html=True,
             )
         st.markdown(_["wp_change"].format(b=wp * 100, a=wp_after * 100, d=(wp_after - wp) * 100))
+        st.caption(team_line(play))
 
         col_diamond, col_gauge, col_li = st.columns([1, 2, 1])
         with col_diamond:
@@ -678,6 +712,8 @@ with st.container():
                     unsafe_allow_html=True,
                 )
 
+                if has_live_state(cached["status"]) and not is_not_started(cached["status"]):
+                    st.caption(team_line(cached))
                 if not has_live_state(cached["status"]):
                     st.caption(_["apply_none"])
                 elif st.button(_["apply"], key="apply_live", width="stretch"):

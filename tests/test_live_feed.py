@@ -133,3 +133,27 @@ def test_has_live_state():
 def test_bad_date_returns_no_games():
     from live_feed import get_todays_games
     assert get_todays_games("2026-10-15 x") == []
+
+
+def test_game_ids_for_the_team_layer(monkeypatch):
+    import team_layer
+    from live_feed import live_wp
+
+    feed = _feed([_play(1, True, 1, (0, 0, 0), 0, 0)],
+                 current={"about": {"inning": 3, "isTopInning": False, "isComplete": False},
+                          "count": {"balls": 1, "strikes": 0, "outs": 1}})
+    feed["gameData"]["teams"] = {"home": {"name": "H", "id": 147}, "away": {"name": "A", "id": 111}}
+    feed["gameData"]["datetime"] = {"officialDate": "2026-07-01"}
+    s = parse_live_state(feed)
+    assert (s["home_id"], s["away_id"], s["game_date"], s["game_type"]) == (147, 111, "2026-07-01", "R")
+    assert parse_game_plays(feed)[0]["home_id"] == 147
+
+    seen = []
+    monkeypatch.setattr(team_layer, "strengths",
+                        lambda h, a, d: seen.append((h, a, d)) or {"d_prev": 0.3, "d_cur": 0.1, "teams": {}})
+    out = live_wp(s)
+    assert seen == [(147, 111, "2026-07-01")]
+    assert out["team_layer"]["applied"] and 0 < out["team_layer"]["team_wp"] < 1
+    post = live_wp({**s, "game_type": "F"})
+    assert post["team_layer"] == {"applied": False, "reason": "not_regular_season"}
+    assert "team_layer" not in live_wp({**s, "status": "Final"})

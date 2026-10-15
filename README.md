@@ -51,6 +51,8 @@ MLB Stats API の play-by-play から作った打席ごとの遷移（2021〜202
 
 0.3〜0.5 の帯の高めの偏りは、補正層でも対照（較正し直しただけ）と同じだけしか変わりません（帯での予測の平均の差 補正層−対照 +0.001、95% 区間 −0.0016〜+0.0036）。帯の偏りの原因がチームの強さだという見立ては、この結果では裏づけられていません。較正し直すことで帯の偏りがどれだけ縮むかは、1 シーズンでは区間が広く分かりません。詳細は [`research/wp_layer/RESULTS.md`](research/wp_layer/RESULTS.md) にあります。
 
+事前登録で決めたとおり、補正層はアプリと API に入れました（係数は採点したものそのまま・`team_layer.py`）。レギュラーシーズンの試合では、ライブ表示とリプレイでエンジンの勝率と並べてチーム力込みの勝率を出し、`/wp/live/{gamePk}` は `team_layer` で返します。得失点差は MLB Stats API の日程から学習時と同じ規則（終わった試合だけ・継続試合は最初の日に 1 回・その日より前の試合・n/(n+30) で縮める）で作ります。2025 年の全 2,430 試合で学習時の値と一致し（差 0）、2026 年の採点の予測も再現することを `scripts/check_team_layer.py` で確かめています。カウントは使いません（学習が打席前の状態のため）。ポストシーズンの試合と、手で入力する分析には使いません。
+
 ## データ
 
 `scripts/build_states.py` が MLB Stats API から打席・走者・投球の表を作ります（GitHub Actions の `build-states.yml` を手動で実行し、Release `states-v1` に出力）。各試合で次を確かめ、どれかが合わない試合は捨てます。
@@ -106,7 +108,7 @@ Docker なら `docker compose up --build` で `http://localhost:8001/docs` で�
 | `GET /re24` | 24 の塁・アウト状態の得点期待値と、1 点以上入る確率 |
 | `GET /wp/scenario` | プリセットの局面 |
 | `GET /games/today` | その日の試合一覧（`date=YYYY-MM-DD`） |
-| `GET /wp/live/{gamePk}` | 試合の現在の局面と勝率 |
+| `GET /wp/live/{gamePk}` | 試合の現在の局面と勝率（レギュラーシーズンはチーム力込みの勝率 `team_layer` も） |
 
 `/wp`・`/wp/play`・`/wp/advice` は `extra_runner=false` で延長の二塁走者なし（ポストシーズンと 2019 年以前）として計算します。7 イニングの試合は `scheduled_innings=7` を渡します。カウントは `balls` と `strikes` を両方渡したときだけ使います。
 
