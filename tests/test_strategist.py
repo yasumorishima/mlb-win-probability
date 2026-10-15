@@ -5,6 +5,8 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import strategist  # noqa: E402
@@ -66,3 +68,18 @@ def test_no_key_means_no_call(monkeypatch):
     assert strategist.steal_probability({"x": 1}) is None
     adv, problems = strategist.advise({}, {}, {})
     assert adv is None and problems == ["no valid response"]
+
+
+def test_client_limits_retries_and_timeout(monkeypatch):
+    anthropic = pytest.importorskip("anthropic")
+    import strategist
+    seen = {}
+
+    class Fake:
+        def __init__(self, **kw):
+            seen.update(kw)
+
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-not-a-key")
+    monkeypatch.setattr(anthropic, "Anthropic", Fake)
+    strategist._client()
+    assert seen == {"max_retries": 0, "timeout": 60.0}

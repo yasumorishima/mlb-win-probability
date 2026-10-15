@@ -6,3 +6,6 @@ services:
       - "8001:8000"
     environment:
       - PYTHONUNBUFFERED=1
+      # /wp/advice needs both (passed through from the host when set)
+      - ANTHROPIC_API_KEY
+      - ADVICE_TOKEN

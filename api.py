@@ -1,48 +1,53 @@
 """
 MLB Win Probability API
 
-Calculate real-time Win Probability, Leverage Index, and tactical recommendations
-from game state inputs. Markov Chain + RE24 approach, no external data dependencies.
+Win probability, Leverage Index, run expectancy and tactics from a game
+state, computed by the engine fitted to real plate-appearance transitions
+(wp_engine.py, engine_tables.json) through analysis.py. /wp/advice asks
+Claude (strategist.py) for a recommendation; it needs ANTHROPIC_API_KEY and
+ADVICE_TOKEN, and each request must send X-Advice-Token. It has no call
+count cap, so keep the token private.
 """
 
+import hmac
+import os
+from datetime import datetime
 from enum import Enum
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 
-from win_probability import (
-    MLB_RPG,
+from analysis import (
     SCENARIOS,
     GameState,
     analyze_scenario,
-    calculate_li,
-    calculate_wp,
-    calculate_wpa,
+    engine_info,
     full_analysis,
-    get_re24_table,
-    li_label,
+    get_advice,
+    has_api_key,
+    re24_table,
+    wpa,
 )
-from live_feed import get_todays_games, get_live_state, get_live_wp
-from gemini_commentary import (
-    generate_commentary,
-    evaluate_commentary_quality,
-    get_commentary_metadata,
-)
+from live_feed import get_live_wp, get_todays_games
 
 app = FastAPI(
     title="MLB Win Probability API",
     description=(
-        "MLB/NPB game state to Win Probability, Leverage Index, and tactical recommendations.\n\n"
-        "## Approach\n"
-        "- **Win Probability**: Markov Chain + Normal distribution approximation\n"
-        "- **RE24**: Run Expectancy by 24 base-out states (MLB 2010-2019 avg)\n"
-        "- **Leverage Index**: Expected WP swing relative to league average\n"
-        "- **Tactics**: RE24-based expected value comparison of 8 tactical options\n\n"
-        "## Scoring Environment\n"
-        "- MLB default: 4.5 runs/game\n"
-        "- NPB: 4.0 runs/game (pass `runs_per_game=4.0`)\n"
+        "MLB game state to win probability, Leverage Index, run expectancy and tactics.\n\n"
+        "## Engine\n"
+        "- **Win probability**: plate-appearance transitions of MLB regular-season games "
+        "(Stats API play-by-play), run distributions per half-inning by dynamic programming, "
+        "then a recursion over half-innings with walk-off rules and the extra-inning runner\n"
+        "- **Count**: optional `balls`/`strikes` shift the mix of plate-appearance outcomes\n"
+        "- **Leverage Index**: expected |WP change| of the next plate appearance over the league average\n"
+        "- **Tactics**: stolen-base break-even success rate; sacrifice bunt and intentional walk "
+        "as a change in win probability for the side that chooses them\n"
+        "- Every player is treated as league-average.\n\n"
+        "## Claude bench coach\n"
+        "`/wp/advice` sends the situation and the engine's numbers to Claude and returns its "
+        "recommendation with the numbers it cited (503 when ANTHROPIC_API_KEY is not set)."
     ),
-    version="0.1.0",
+    version="0.3.0",
 )
 
 app.add_middleware(
@@ -51,6 +56,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+EXTRA_RUNNER_DOC = ("Extra innings start with a runner on second (regular season 2020+). "
+                    "Set false for the postseason and for earlier seasons.")
 
 
 class Lang(str, Enum):
@@ -63,24 +72,32 @@ class TopBottom(str, Enum):
     bottom = "bottom"
 
 
-class ScenarioName(str, Enum):
-    ninth_inning_drama = "ninth_inning_drama"
-    game_start = "game_start"
-    rally_7th = "rally_7th"
-    tied_8th = "tied_8th"
-    walkoff_chance = "walkoff_chance"
-    comfortable_lead = "comfortable_lead"
+ScenarioName = Enum("ScenarioName", {k: k for k in SCENARIOS}, type=str)
+
+
+def _analysis(inning, top_bottom, outs, runner1, runner2, runner3, score_diff,
+              scheduled_innings, balls, strikes, extra_runner=True):
+    if (balls is None) != (strikes is None):
+        raise HTTPException(status_code=422, detail="give both balls and strikes, or neither")
+    try:
+        return full_analysis(inning, top_bottom.value, outs, (runner1, runner2, runner3),
+                             score_diff, scheduled_innings, balls, strikes,
+                             extra_runner=extra_runner)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+
+
 
 
 @app.get("/")
 def root():
     return {
         "name": "MLB Win Probability API",
-        "version": "0.2.0",
+        "version": app.version,
+        "model": engine_info(),
         "endpoints": [
             "/wp",
-            "/wp/commentary",
-            "/commentary/info",
+            "/wp/advice",
             "/wp/play",
             "/re24",
             "/wp/scenario",
@@ -95,157 +112,138 @@ def root():
     "/wp",
     summary="Win Probability + Leverage Index + Tactics",
     description=(
-        "Calculate Win Probability for the home team given the current game state. "
-        "Also returns Leverage Index and tactical recommendations."
+        "Home win probability for the given state, the batting team's win probability, "
+        "Leverage Index, run expectancy for the rest of the half, WP after each kind of "
+        "plate-appearance outcome, and tactics."
     ),
 )
 def get_wp(
-    inning: int = Query(ge=1, le=15, description="Current inning (1-15)", examples=[1, 7, 9]),
+    inning: int = Query(ge=1, le=20, description="Current inning"),
     top_bottom: TopBottom = Query(description="Top or bottom of inning"),
     outs: int = Query(ge=0, le=2, description="Number of outs (0-2)"),
     runner1: int = Query(default=0, ge=0, le=1, description="Runner on 1st base (0 or 1)"),
     runner2: int = Query(default=0, ge=0, le=1, description="Runner on 2nd base (0 or 1)"),
     runner3: int = Query(default=0, ge=0, le=1, description="Runner on 3rd base (0 or 1)"),
-    score_diff: int = Query(default=0, ge=-20, le=20, description="Score difference (home - away)"),
-    runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment (MLB=4.5, NPB=4.0)"),
-    batter_ops: float | None = Query(default=None, ge=0.0, le=2.0, description="Batter OPS for matchup adjustment"),
-    pitcher_era: float | None = Query(default=None, ge=0.0, le=15.0, description="Pitcher ERA for matchup adjustment"),
+    score_diff: int = Query(default=0, ge=-30, le=30, description="Score difference (home - away)"),
+    scheduled_innings: int = Query(default=9, ge=1, le=9, description="Scheduled innings (9; 7 for 2020-21 doubleheaders)"),
+    balls: int | None = Query(default=None, ge=0, le=3, description="Balls in the current count (optional)"),
+    strikes: int | None = Query(default=None, ge=0, le=2, description="Strikes in the current count (optional)"),
+    extra_runner: bool = Query(default=True, description=EXTRA_RUNNER_DOC),
 ):
-    runners = (runner1, runner2, runner3)
-    result = full_analysis(
-        inning, top_bottom.value, outs, runners, score_diff,
-        runs_per_game, batter_ops, pitcher_era,
-    )
-    return result
+    return _analysis(inning, top_bottom, outs, runner1, runner2, runner3, score_diff,
+                     scheduled_innings, balls, strikes, extra_runner)
 
 
 @app.get(
-    "/wp/commentary",
-    summary="AI Commentary (Gemini 2.5 Flash)",
+    "/wp/advice",
+    summary="Claude bench coach",
     description=(
-        "Generate natural language game situation commentary using Gemini API. "
-        "Gemini 2.5 Flash + Cloud Run architecture for real-time game analysis.\n\n"
-        "Requires `GEMINI_API_KEY` environment variable."
+        "Claude's recommendation for the next pitch, from the situation and the engine's numbers "
+        "(the same analysis as /wp). Returns the recommendation, its reason, the numbers it cited "
+        "and any cited number that does not match the input. "
+        "Requires the `ANTHROPIC_API_KEY` and `ADVICE_TOKEN` environment variables (503 "
+        "otherwise) and the header `X-Advice-Token` equal to `ADVICE_TOKEN` (401 otherwise), "
+        "so that nobody else can spend the key."
     ),
 )
-def get_commentary(
-    inning: int = Query(ge=1, le=15, description="Current inning (1-15)"),
+def get_wp_advice(
+    inning: int = Query(ge=1, le=20, description="Current inning"),
     top_bottom: TopBottom = Query(description="Top or bottom of inning"),
     outs: int = Query(ge=0, le=2, description="Number of outs (0-2)"),
     runner1: int = Query(default=0, ge=0, le=1, description="Runner on 1st base (0 or 1)"),
     runner2: int = Query(default=0, ge=0, le=1, description="Runner on 2nd base (0 or 1)"),
     runner3: int = Query(default=0, ge=0, le=1, description="Runner on 3rd base (0 or 1)"),
-    score_diff: int = Query(default=0, ge=-20, le=20, description="Score difference (home - away)"),
-    runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment"),
-    batter_ops: float | None = Query(default=None, ge=0.0, le=2.0, description="Batter OPS"),
-    pitcher_era: float | None = Query(default=None, ge=0.0, le=15.0, description="Pitcher ERA"),
-    lang: Lang = Query(default=Lang.ja, description="Commentary language (JA or EN)"),
+    score_diff: int = Query(default=0, ge=-30, le=30, description="Score difference (home - away)"),
+    scheduled_innings: int = Query(default=9, ge=1, le=9, description="Scheduled innings"),
+    balls: int | None = Query(default=None, ge=0, le=3, description="Balls (optional)"),
+    strikes: int | None = Query(default=None, ge=0, le=2, description="Strikes (optional)"),
+    lang: Lang = Query(default=Lang.en, description="Language of the reason (EN or JA)"),
+    extra_runner: bool = Query(default=True, description=EXTRA_RUNNER_DOC),
+    x_advice_token: str | None = Header(default=None, description="Must equal ADVICE_TOKEN"),
 ):
-    from fastapi import HTTPException
-
-    runners = (runner1, runner2, runner3)
-    result = full_analysis(
-        inning, top_bottom.value, outs, runners, score_diff,
-        runs_per_game, batter_ops, pitcher_era,
-    )
-
-    commentary = generate_commentary(result, lang=lang.value)
-    if commentary is None:
+    token = os.environ.get("ADVICE_TOKEN", "").strip()
+    if not has_api_key() or not token or not token.isascii():
         raise HTTPException(
             status_code=503,
-            detail="GEMINI_API_KEY not configured. Set the environment variable to enable AI commentary.",
+            detail=("/wp/advice is disabled. Set ANTHROPIC_API_KEY and ADVICE_TOKEN (ASCII) in "
+                    "the server environment to enable it."),
         )
-
-    quality = evaluate_commentary_quality(commentary, result, lang=lang.value)
-
+    if (not x_advice_token or not x_advice_token.isascii()
+            or not hmac.compare_digest(x_advice_token.encode(), token.encode())):
+        raise HTTPException(status_code=401, detail="missing or wrong X-Advice-Token header")
+    result = _analysis(inning, top_bottom, outs, runner1, runner2, runner3, score_diff,
+                       scheduled_innings, balls, strikes, extra_runner)
+    if result["game_over"]:
+        raise HTTPException(status_code=422, detail="the game is over in this state")
+    adv, problems, payload = get_advice(result, lang.value)
+    if adv is None:
+        raise HTTPException(status_code=502,
+                            detail="no valid response from the model: " + "; ".join(problems))
     return {
         **result,
-        "ai_commentary": commentary,
-        "quality_evaluation": quality,
-        "model": "gemini-2.5-flash",
-        "lang": lang.value,
+        "advice": adv.model_dump(),
+        "citation_problems": problems,
+        "advice_input": payload,
     }
-
-
-@app.get(
-    "/commentary/info",
-    summary="Commentary System Metadata",
-    description=(
-        "Returns current prompt version, quality criteria, and available versions. "
-        "Similar to /model/info in baseball-mlops Cloud Run API."
-    ),
-)
-def commentary_info():
-    return get_commentary_metadata()
 
 
 @app.get(
     "/wp/play",
     summary="WPA (Win Probability Added) for a single play",
     description=(
-        "Calculate the WPA for a transition from one game state to another. "
-        "Provide before and after states."
+        "Change in home win probability between two states. `after_outs=3` means the play "
+        "ended the half-inning."
     ),
 )
 def get_wpa(
-    # Before state
-    before_inning: int = Query(ge=1, le=15, description="Inning before play"),
+    before_inning: int = Query(ge=1, le=20, description="Inning before play"),
     before_top_bottom: TopBottom = Query(description="Top/bottom before play"),
     before_outs: int = Query(ge=0, le=2, description="Outs before play"),
     before_runner1: int = Query(default=0, ge=0, le=1, description="Runner on 1B before"),
     before_runner2: int = Query(default=0, ge=0, le=1, description="Runner on 2B before"),
     before_runner3: int = Query(default=0, ge=0, le=1, description="Runner on 3B before"),
-    before_score_diff: int = Query(default=0, ge=-20, le=20, description="Score diff before"),
-    # After state
-    after_inning: int = Query(ge=1, le=15, description="Inning after play"),
+    before_score_diff: int = Query(default=0, ge=-30, le=30, description="Score diff before"),
+    after_inning: int = Query(ge=1, le=20, description="Inning after play"),
     after_top_bottom: TopBottom = Query(description="Top/bottom after play"),
     after_outs: int = Query(ge=0, le=3, description="Outs after play (0-3)"),
     after_runner1: int = Query(default=0, ge=0, le=1, description="Runner on 1B after"),
     after_runner2: int = Query(default=0, ge=0, le=1, description="Runner on 2B after"),
     after_runner3: int = Query(default=0, ge=0, le=1, description="Runner on 3B after"),
-    after_score_diff: int = Query(default=0, ge=-20, le=20, description="Score diff after"),
-    runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment"),
+    after_score_diff: int = Query(default=0, ge=-30, le=30, description="Score diff after"),
+    scheduled_innings: int = Query(default=9, ge=1, le=9, description="Scheduled innings"),
+    extra_runner: bool = Query(default=True, description=EXTRA_RUNNER_DOC),
 ):
-    before = GameState(
-        before_inning, before_top_bottom.value, before_outs,
-        (before_runner1, before_runner2, before_runner3),
-        before_score_diff, runs_per_game,
-    )
-    after = GameState(
-        after_inning, after_top_bottom.value, min(after_outs, 2),
-        (after_runner1, after_runner2, after_runner3),
-        after_score_diff, runs_per_game,
-    )
-    result = calculate_wpa(before, after)
-    result["before_state"] = {
-        "inning": before.inning, "top_bottom": before.top_bottom,
-        "outs": before.outs,
-        "runners": {"1B": before.runners[0], "2B": before.runners[1], "3B": before.runners[2]},
-        "score_diff": before.score_diff,
-    }
-    result["after_state"] = {
-        "inning": after.inning, "top_bottom": after.top_bottom,
-        "outs": after.outs,
-        "runners": {"1B": after.runners[0], "2B": after.runners[1], "3B": after.runners[2]},
-        "score_diff": after.score_diff,
-    }
+    before = GameState(before_inning, before_top_bottom.value, before_outs,
+                       (before_runner1, before_runner2, before_runner3),
+                       before_score_diff, scheduled_innings)
+    after = GameState(after_inning, after_top_bottom.value, after_outs,
+                      (after_runner1, after_runner2, after_runner3),
+                      after_score_diff, scheduled_innings)
+    try:
+        result = wpa(before, after, extra_runner)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
+    for key, s in (("before_state", before), ("after_state", after)):
+        result[key] = {
+            "inning": s.inning, "top_bottom": s.top_bottom, "outs": s.outs,
+            "runners": {"1B": s.runners[0], "2B": s.runners[1], "3B": s.runners[2]},
+            "score_diff": s.score_diff,
+        }
     return result
 
 
 @app.get(
     "/re24",
-    summary="RE24 Table (Run Expectancy by 24 base-out states)",
-    description="Returns the full RE24 table scaled by the given scoring environment.",
+    summary="Run expectancy for the 24 base-out states",
+    description=(
+        "Expected runs in the rest of the half-inning and P(at least one run) for each "
+        "base-out state, from the engine's run distributions (top = visitors batting, "
+        "bottom = home batting)."
+    ),
 )
-def get_re24(
-    runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment (MLB=4.5, NPB=4.0)"),
-):
-    table = get_re24_table(runs_per_game)
-    return {
-        "runs_per_game": runs_per_game,
-        "count": len(table),
-        "re24_table": table,
-    }
+def get_re24(half: TopBottom = Query(default=TopBottom.top, description="Half-inning")):
+    table = re24_table(half.value)
+    return {"half": half.value, "count": len(table), "re24_table": table}
 
 
 @app.get(
@@ -253,12 +251,8 @@ def get_re24(
     summary="Preset Scenario Analysis",
     description="Analyze a preset game scenario (e.g., 9th inning drama, walk-off chance).",
 )
-def get_scenario(
-    name: ScenarioName = Query(description="Scenario name"),
-    runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment"),
-):
-    result = analyze_scenario(name.value, runs_per_game)
-    return result
+def get_scenario(name: ScenarioName = Query(description="Scenario name")):
+    return analyze_scenario(name.value)
 
 
 @app.get(
@@ -267,8 +261,14 @@ def get_scenario(
     description="Return today's MLB games with status (Scheduled / In Progress / Final).",
 )
 def games_today(
-    date: str | None = Query(default=None, description="Date in YYYY-MM-DD (default: today UTC)"),
+    date: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$",
+                             description="Date in YYYY-MM-DD (default: today UTC)"),
 ):
+    if date is not None:
+        try:
+            datetime.strptime(date, "%Y-%m-%d")
+        except ValueError:
+            raise HTTPException(status_code=422, detail=f"not a calendar date: {date}") from None
     games = get_todays_games(date)
     return {"date": date or "today", "count": len(games), "games": games}
 
@@ -277,16 +277,12 @@ def games_today(
     "/wp/live/{game_pk}",
     summary="Live Win Probability for a Game",
     description=(
-        "Fetch live game state from MLB Stats API and compute Win Probability + LI + tactics.\n\n"
-        "Use `/games/today` to get valid `gamePk` values."
+        "Fetch the live game state from the MLB Stats API and compute win probability, "
+        "Leverage Index and tactics.\n\nUse `/games/today` to get valid `gamePk` values."
     ),
 )
-def wp_live(
-    game_pk: int,
-    runs_per_game: float = Query(default=MLB_RPG, ge=2.0, le=8.0, description="Scoring environment (MLB=4.5, NPB=4.0)"),
-):
-    from fastapi import HTTPException
-    result = get_live_wp(game_pk, runs_per_game)
+def wp_live(game_pk: int):
+    result = get_live_wp(game_pk)
     if result is None:
         raise HTTPException(status_code=404, detail=f"Game {game_pk} not found or API unavailable")
     return result

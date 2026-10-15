@@ -11,7 +11,7 @@ The held-out check scores the
 home win probability before every plate appearance of the test season
 against the final result (Brier score, log loss, calibration by decile)
 and compares it with the old normal-approximation engine
-(win_probability.calculate_wp).
+(scripts/old_engine.py, the hand-tuned function the app used before).
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def main() -> None:
 
     report = {"train": a.train, "test": a.test, "engine": score(p_new, y)}
     try:
-        from win_probability import calculate_wp
+        from old_engine import calculate_wp  # scripts/old_engine.py
         p_old = np.array([
             calculate_wp(r.inning, r.half, r.outs, (_occ(r.on_1b), _occ(r.on_2b), _occ(r.on_3b)),
                          r.home_score - r.away_score)
