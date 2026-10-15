@@ -1,8 +1,14 @@
 """
 MLB Live Feed
 
-Fetch today's games and live game state from the MLB Stats API.
+Fetch today's games and live game state from the MLB Stats API (keyless).
 No external dependencies — uses stdlib urllib.request + json only.
+
+Game states follow scripts/build_states.py, which the engine was fitted on:
+the state before a play is the previous play's count.outs (0 at the start
+of a half) and matchup.postOnFirst/Second/Third; regular-season (and
+spring) games from 2020 start every extra half-inning with a runner on
+second.
 """
 
 import json
@@ -11,6 +17,10 @@ import urllib.error
 from datetime import datetime, timezone
 
 _BASE = "https://statsapi.mlb.com/api"
+
+# Game types that start extra innings with a runner on second (2020+).
+# Postseason games (F, D, L, W) do not.
+AUTO_RUNNER_GAME_TYPES = ("R", "S")
 
 
 def _fetch(url: str) -> dict | None:
@@ -53,94 +63,109 @@ def get_todays_games(date: str | None = None) -> list[dict]:
     return games
 
 
-def get_live_state(game_pk: int) -> dict | None:
-    """
-    Fetch live game state for a single game.
+def _game_rules(data: dict) -> tuple[int, bool]:
+    """(scheduled innings, automatic runner on second in extra innings)."""
+    game = data.get("gameData", {}).get("game", {})
+    try:
+        season = int(game.get("season") or 0)
+    except (TypeError, ValueError):
+        season = 0
+    sched = int(data.get("liveData", {}).get("linescore", {}).get("scheduledInnings") or 9)
+    return sched, season >= 2020 and game.get("type") in AUTO_RUNNER_GAME_TYPES
 
-    Returns dict with keys:
-        inning, top_bottom, outs, runners (tuple[int,int,int]),
-        score_home, score_away, score_diff,
-        batter_name, pitcher_name,
-        away_team, home_team, status
-    Returns None if game not found or API error.
-    """
-    data = _fetch(f"{_BASE}/v1.1/game/{game_pk}/feed/live")
-    if data is None:
-        return None
 
+def _half_start(inning: int, sched: int, extra_runner: bool) -> tuple[int, int, int]:
+    return (0, 1, 0) if extra_runner and inning > sched else (0, 0, 0)
+
+
+def _bases_after(play: dict) -> tuple[int, int, int]:
+    m = play.get("matchup", {})
+    return tuple(1 if m.get(k) else 0 for k in ("postOnFirst", "postOnSecond", "postOnThird"))
+
+
+def _pitch_hit(event: dict) -> tuple[dict | None, dict | None]:
+    pitch_data = hit_data = None
+    pd_raw = event.get("pitchData")
+    if pd_raw:
+        coords = pd_raw.get("coordinates", {})
+        pitch_data = {
+            "startSpeed": pd_raw.get("startSpeed"),
+            "endSpeed": pd_raw.get("endSpeed"),
+            "spinRate": pd_raw.get("spinRate"),
+            "zone": pd_raw.get("zone"),
+            "extension": pd_raw.get("extension"),
+            "coordinates": {
+                "pfxX": coords.get("pfxX"),
+                "pfxZ": coords.get("pfxZ"),
+                "pX": coords.get("pX"),
+                "pZ": coords.get("pZ"),
+            },
+        }
+    hd_raw = event.get("hitData")
+    if hd_raw:
+        hit_data = {
+            "launchSpeed": hd_raw.get("launchSpeed"),
+            "launchAngle": hd_raw.get("launchAngle"),
+            "totalDistance": hd_raw.get("totalDistance"),
+        }
+    return pitch_data, hit_data
+
+
+def parse_live_state(data: dict) -> dict:
+    """Current game state from a /feed/live response (see get_live_state)."""
     game_data = data.get("gameData", {})
     live_data = data.get("liveData", {})
     linescore = live_data.get("linescore", {})
+    sched, extra_runner = _game_rules(data)
 
     status = game_data.get("status", {}).get("detailedState", "Unknown")
-
-    # Teams
     teams = game_data.get("teams", {})
     away_team = teams.get("away", {}).get("name", "Away")
     home_team = teams.get("home", {}).get("name", "Home")
 
-    # Scores
     ls_teams = linescore.get("teams", {})
     score_home = ls_teams.get("home", {}).get("runs", 0)
     score_away = ls_teams.get("away", {}).get("runs", 0)
-    score_diff = score_home - score_away
 
-    # Inning / half / outs
-    inning = linescore.get("currentInning", 1)
-    is_top = linescore.get("isTopInning", True)
-    top_bottom = "top" if is_top else "bottom"
-    outs = linescore.get("outs", 0)
-    # outs=3 means side is over — clamp to 2 for WP engine
-    outs = min(outs, 2)
-
-    # Runners
     offense = linescore.get("offense", {})
-    runner1 = 1 if offense.get("first") else 0
-    runner2 = 1 if offense.get("second") else 0
-    runner3 = 1 if offense.get("third") else 0
-    runners = (runner1, runner2, runner3)
-
-    # Player names
-    batter_name = offense.get("batter", {}).get("fullName", "")
-    defense = linescore.get("defense", {})
-    pitcher_name = defense.get("pitcher", {}).get("fullName", "")
-
-    # Current count
-    plays_data = live_data.get("plays", {})
-    current_play = plays_data.get("currentPlay", {})
+    current_play = live_data.get("plays", {}).get("currentPlay", {})
+    about = current_play.get("about", {})
     count = current_play.get("count", {})
-    balls = count.get("balls", 0)
-    strikes = count.get("strikes", 0)
 
-    # Latest pitch/hit data from current or last completed at-bat
-    pitch_data = None
-    hit_data = None
+    # The state comes from the current play, as in scripts/build_states.py:
+    # a plate appearance in progress -> its half, its outs so far and the
+    # runners on base now; a finished play -> the state it left behind.
+    if about:
+        inning = about.get("inning", 1)
+        top_bottom = "top" if about.get("isTopInning", True) else "bottom"
+    else:
+        inning = linescore.get("currentInning", 1)
+        top_bottom = "top" if linescore.get("isTopInning", True) else "bottom"
+    outs = count.get("outs", linescore.get("outs", 0)) or 0
+    if about.get("isComplete", False):
+        runners = _bases_after(current_play)
+        balls = strikes = 0
+    else:
+        runners = tuple(1 if offense.get(k) else 0 for k in ("first", "second", "third"))
+        balls, strikes = count.get("balls", 0), count.get("strikes", 0)
+
+    # Three outs: the next state is the start of the next half, not
+    # "two outs" of the half that just ended.
+    if outs >= 3:
+        if top_bottom == "top":
+            top_bottom = "bottom"
+        else:
+            top_bottom, inning = "top", inning + 1
+        outs, runners = 0, _half_start(inning, sched, extra_runner)
+        balls = strikes = 0
+
+    if not (0 <= balls <= 3 and 0 <= strikes <= 2):
+        balls = strikes = None  # the plate appearance has ended
+
+    pitch_data = hit_data = None
     play_events = current_play.get("playEvents", [])
     if play_events:
-        last_event = play_events[-1]
-        pd_raw = last_event.get("pitchData")
-        if pd_raw:
-            coords = pd_raw.get("coordinates", {})
-            pitch_data = {
-                "startSpeed": pd_raw.get("startSpeed"),
-                "endSpeed": pd_raw.get("endSpeed"),
-                "spinRate": pd_raw.get("spinRate"),
-                "zone": pd_raw.get("zone"),
-                "extension": pd_raw.get("extension"),
-                "coordinates": {
-                    "pfxX": coords.get("pfxX"),
-                    "pfxZ": coords.get("pfxZ"),
-                    "pX": coords.get("pX"),
-                    "pZ": coords.get("pZ"),
-                },
-            }
-        hd_raw = last_event.get("hitData")
-        if hd_raw:
-            hit_data = {
-                "launchSpeed": hd_raw.get("launchSpeed"),
-                "launchAngle": hd_raw.get("launchAngle"),
-                "totalDistance": hd_raw.get("totalDistance"),
-            }
+        pitch_data, hit_data = _pitch_hit(play_events[-1])
 
     return {
         "inning": inning,
@@ -149,9 +174,11 @@ def get_live_state(game_pk: int) -> dict | None:
         "runners": runners,
         "score_home": score_home,
         "score_away": score_away,
-        "score_diff": score_diff,
-        "batter_name": batter_name,
-        "pitcher_name": pitcher_name,
+        "score_diff": score_home - score_away,
+        "scheduled_innings": sched,
+        "extra_runner": extra_runner,
+        "batter_name": offense.get("batter", {}).get("fullName", ""),
+        "pitcher_name": linescore.get("defense", {}).get("pitcher", {}).get("fullName", ""),
         "away_team": away_team,
         "home_team": home_team,
         "status": status,
@@ -162,101 +189,74 @@ def get_live_state(game_pk: int) -> dict | None:
     }
 
 
-def get_game_plays(game_pk: int) -> list[dict]:
+def get_live_state(game_pk: int) -> dict | None:
     """
-    Return all completed plays from a game, suitable for Replay Mode.
+    Fetch live game state for a single game.
 
-    Each dict has keys:
+    Returns dict with keys:
         inning, top_bottom, outs, runners (tuple[int,int,int]),
-        score_diff (home−away at START of play),
-        home_score, away_score (after play),
-        description, event, batter, pitcher, home_team, away_team
+        score_home, score_away, score_diff, scheduled_innings, extra_runner,
+        batter_name, pitcher_name, away_team, home_team, status,
+        balls, strikes (None between plate appearances), pitch_data, hit_data
+    Returns None if game not found or API error.
     """
     data = _fetch(f"{_BASE}/v1.1/game/{game_pk}/feed/live")
     if data is None:
-        return []
+        return None
+    return parse_live_state(data)
 
+
+def parse_game_plays(data: dict) -> list[dict]:
+    """Completed plays of a /feed/live response with the state before and
+    after each one (see get_game_plays)."""
     teams = data.get("gameData", {}).get("teams", {})
     home_team = teams.get("home", {}).get("name", "Home")
     away_team = teams.get("away", {}).get("name", "Away")
-
-    all_plays = data.get("liveData", {}).get("plays", {}).get("allPlays", [])
+    sched, extra_runner = _game_rules(data)
 
     plays = []
-    prev_home = 0
-    prev_away = 0
+    prev_half = None
+    outs, bases = 0, (0, 0, 0)
+    prev_home = prev_away = 0
 
-    for play in all_plays:
-        if not play.get("about", {}).get("isComplete", False):
+    for play in data.get("liveData", {}).get("plays", {}).get("allPlays", []):
+        about = play.get("about", {})
+        if not about.get("isComplete", False):
             continue
-
-        about = play["about"]
         result = play.get("result", {})
         matchup = play.get("matchup", {})
-        runners_list = play.get("runners", [])
-
         inning = about.get("inning", 1)
-        top_bottom = "bottom" if not about.get("isTopInning", True) else "top"
-        outs = min(about.get("outs", 0), 2)
+        top_bottom = "top" if about.get("isTopInning", True) else "bottom"
+        if (inning, top_bottom) != prev_half:
+            outs, bases = 0, _half_start(inning, sched, extra_runner)
+            prev_half = (inning, top_bottom)
 
-        # Runners at START of play (originBase = where they stood before)
-        runners_before = {"1B": 0, "2B": 0, "3B": 0}
-        for r in runners_list:
-            start = r.get("movement", {}).get("originBase")
-            if start in ["1B", "2B", "3B"]:
-                runners_before[start] = 1
-
-        # Score at START = previous play's end state
-        score_diff = prev_home - prev_away
-
-        # Score AFTER this play
         home_score = result.get("homeScore", prev_home)
         away_score = result.get("awayScore", prev_away)
+        outs_after = min(play.get("count", {}).get("outs", outs), 3)
+        bases_after = _bases_after(play)
 
-        # Extract pitch/hit data from the last playEvent (at-bat result pitch)
-        play_events = play.get("playEvents", [])
-        pitch_data = None
-        hit_data = None
+        pitch_data = hit_data = None
         count_data = {"balls": 0, "strikes": 0}
+        play_events = play.get("playEvents", [])
         if play_events:
-            last_event = play_events[-1]
-            pd_raw = last_event.get("pitchData")
-            if pd_raw:
-                coords = pd_raw.get("coordinates", {})
-                pitch_data = {
-                    "startSpeed": pd_raw.get("startSpeed"),
-                    "endSpeed": pd_raw.get("endSpeed"),
-                    "spinRate": pd_raw.get("spinRate"),
-                    "zone": pd_raw.get("zone"),
-                    "extension": pd_raw.get("extension"),
-                    "coordinates": {
-                        "pfxX": coords.get("pfxX"),
-                        "pfxZ": coords.get("pfxZ"),
-                        "pX": coords.get("pX"),
-                        "pZ": coords.get("pZ"),
-                    },
-                }
-            hd_raw = last_event.get("hitData")
-            if hd_raw:
-                hit_data = {
-                    "launchSpeed": hd_raw.get("launchSpeed"),
-                    "launchAngle": hd_raw.get("launchAngle"),
-                    "totalDistance": hd_raw.get("totalDistance"),
-                }
-            count = last_event.get("count", {})
-            count_data = {
-                "balls": count.get("balls", 0),
-                "strikes": min(count.get("strikes", 0), 2),
-            }
+            pitch_data, hit_data = _pitch_hit(play_events[-1])
+            count = play_events[-1].get("count", {})
+            count_data = {"balls": count.get("balls", 0), "strikes": count.get("strikes", 0)}
 
         plays.append({
             "inning": inning,
             "top_bottom": top_bottom,
             "outs": outs,
-            "runners": (runners_before["1B"], runners_before["2B"], runners_before["3B"]),
-            "score_diff": score_diff,
+            "runners": bases,
+            "score_diff": prev_home - prev_away,
+            "outs_after": outs_after,
+            "runners_after": bases_after,
+            "runs_on_play": (home_score - prev_home) + (away_score - prev_away),
             "home_score": home_score,
             "away_score": away_score,
+            "scheduled_innings": sched,
+            "extra_runner": extra_runner,
             "description": result.get("description", ""),
             "event": result.get("event", ""),
             "batter": matchup.get("batter", {}).get("fullName", ""),
@@ -268,36 +268,59 @@ def get_game_plays(game_pk: int) -> list[dict]:
             "balls": count_data["balls"],
             "strikes": count_data["strikes"],
         })
-
-        prev_home = home_score
-        prev_away = away_score
+        outs, bases = outs_after, bases_after
+        prev_home, prev_away = home_score, away_score
 
     return plays
 
 
-def get_live_wp(game_pk: int, runs_per_game: float = 4.5) -> dict | None:
+def get_game_plays(game_pk: int) -> list[dict]:
+    """
+    Return all completed plays from a game, suitable for Replay Mode.
+
+    Each dict has keys:
+        inning, top_bottom, outs, runners (state BEFORE the play),
+        score_diff (home - away BEFORE the play),
+        outs_after (0-3), runners_after, runs_on_play,
+        home_score, away_score (after the play), scheduled_innings,
+        extra_runner, description, event, batter, pitcher, home_team,
+        away_team, pitch_data, hit_data, balls, strikes (final count)
+    """
+    data = _fetch(f"{_BASE}/v1.1/game/{game_pk}/feed/live")
+    if data is None:
+        return []
+    return parse_game_plays(data)
+
+
+def live_wp(state: dict) -> dict:
+    """Live state + win probability analysis (analysis.full_analysis)."""
+    from analysis import full_analysis
+
+    status = state["status"]
+    if status in ("Scheduled", "Pre-Game", "Warmup") or status.startswith("Delayed Start"):
+        return {**state, "status_note": "Game not yet started", "win_probability": None}
+    if status.startswith(("Final", "Game Over", "Completed Early")):
+        won = state["score_home"] > state["score_away"]
+        return {**state, "status_note": "Game over",
+                "win_probability": 1.0 if won else 0.0,
+                "win_probability_pct": "100.0%" if won else "0.0%"}
+
+    analysis = full_analysis(
+        state["inning"], state["top_bottom"], state["outs"], state["runners"],
+        state["score_diff"], state["scheduled_innings"],
+        state["balls"], state["strikes"], extra_runner=state["extra_runner"],
+    )
+    return {**state, **analysis}
+
+
+def get_live_wp(game_pk: int) -> dict | None:
     """
     Fetch live game state and compute Win Probability + full analysis.
 
-    Returns combined dict: live state + full_analysis() output.
-    Returns None if game not found or not in a computable state.
+    Returns combined dict: live state + analysis.full_analysis() output.
+    Returns None if game not found.
     """
-    from win_probability import full_analysis
-
     state = get_live_state(game_pk)
     if state is None:
         return None
-
-    # If game hasn't started or is already final, return state + flag
-    if state["status"] in ("Scheduled", "Pre-Game", "Warmup"):
-        return {**state, "status_note": "Game not yet started", "win_probability": None}
-
-    analysis = full_analysis(
-        state["inning"],
-        state["top_bottom"],
-        state["outs"],
-        state["runners"],
-        state["score_diff"],
-        runs_per_game,
-    )
-    return {**state, **analysis}
+    return live_wp(state)
