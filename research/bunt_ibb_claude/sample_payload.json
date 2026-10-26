@@ -1,0 +1,154 @@
+{
+ "bunt": {
+  "B": {
+   "part": "bunt",
+   "date": "2026-06-01",
+   "population": "Completed plate appearances in MLB regular-season games that ended on a bunt (sacrifice, bunt hit, bunt out, or strikeout on a foul bunt) with 0 or 1 out, a runner on first and/or second and third base empty. Success = the lead runner (the runner on second if there is one, otherwise the runner on first) ends the play on a later base or scores. Failure = the lead runner is put out or stays.",
+   "question": "Probability that the lead runner advances (success as defined).",
+   "league_this_season_before_today": {
+    "units": 350,
+    "successes": 296,
+    "success_rate_used": 0.846,
+    "note": "rate of earlier dates this season in this population; the previous season's rate until the season has 100 such bunts"
+   },
+   "situation": {
+    "inning": 1,
+    "half": "top",
+    "outs": 0,
+    "runner_on_first": true,
+    "runner_on_second": true,
+    "runner_on_third": false,
+    "batting_team_score_minus_fielding_team_score": 0
+   },
+   "teams": {
+    "offense": "Miami Marlins",
+    "defense": "Washington Nationals"
+   },
+   "batter": {
+    "name": "Kyle Stowers",
+    "bunts_in_this_population_since_2021_before_today": 1,
+    "successes_in_those_bunts": 1,
+    "plate_appearances_since_2021_before_today": 945,
+    "times_on_base_in_those_plate_appearances": 301
+   },
+   "pitcher": {
+    "name": "Cade Cavalli"
+   }
+  },
+  "C": {
+   "part": "bunt",
+   "date": "2026-06-01",
+   "population": "Completed plate appearances in MLB regular-season games that ended on a bunt (sacrifice, bunt hit, bunt out, or strikeout on a foul bunt) with 0 or 1 out, a runner on first and/or second and third base empty. Success = the lead runner (the runner on second if there is one, otherwise the runner on first) ends the play on a later base or scores. Failure = the lead runner is put out or stays.",
+   "question": "Probability that the lead runner advances (success as defined).",
+   "league_this_season_before_today": {
+    "units": 350,
+    "successes": 296,
+    "success_rate_used": 0.846,
+    "note": "rate of earlier dates this season in this population; the previous season's rate until the season has 100 such bunts"
+   },
+   "situation": {
+    "inning": 1,
+    "half": "top",
+    "outs": 0,
+    "runner_on_first": true,
+    "runner_on_second": true,
+    "runner_on_third": false,
+    "batting_team_score_minus_fielding_team_score": 0
+   },
+   "teams": {
+    "offense": "Miami Marlins",
+    "defense": "Washington Nationals"
+   },
+   "batter": {
+    "name": "Kyle Stowers",
+    "bunts_in_this_population_since_2021_before_today": 1,
+    "successes_in_those_bunts": 1,
+    "plate_appearances_since_2021_before_today": 945,
+    "times_on_base_in_those_plate_appearances": 301
+   },
+   "pitcher": {
+    "name": "Cade Cavalli"
+   },
+   "statistical_model_estimate": {
+    "p_success": 0.838,
+    "what_it_is": "L2 logistic regression on the situation, the league rate and the shrunk records above; trained on this population from 2023-03-30 to the day before 2026-07-01."
+   }
+  }
+ },
+ "obp": {
+  "B": {
+   "part": "obp",
+   "date": "2026-06-01",
+   "population": "Completed plate appearances in MLB regular-season games in the 7th inning or later with first base empty and a runner on second and/or third. Intentional walks and catcher's interference are excluded. Success = the batter reaches base by a hit, walk or hit by pitch; anything else (including reaching on an error or a fielder's choice) = failure.",
+   "question": "Probability that the batter reaches base (success as defined).",
+   "league_this_season_before_today": {
+    "units": 66901,
+    "successes": 21087,
+    "success_rate_used": 0.315,
+    "note": "on-base rate (hit, walk, hit by pitch) of all completed plate appearances on earlier dates this season, excluding intentional walks and catcher's interference; the previous season's rate until the season has 2000 plate appearances"
+   },
+   "situation": {
+    "inning": 8,
+    "half": "top",
+    "outs": 2,
+    "runner_on_first": false,
+    "runner_on_second": true,
+    "runner_on_third": false,
+    "batting_team_score_minus_fielding_team_score": -5
+   },
+   "teams": {
+    "offense": "Chicago White Sox",
+    "defense": "Minnesota Twins"
+   },
+   "batter": {
+    "name": "Edgar Quero",
+    "plate_appearances_since_2021_before_today": 537,
+    "times_on_base_in_those_plate_appearances": 171
+   },
+   "pitcher": {
+    "name": "Yoendrys Gómez",
+    "batters_faced_since_2021_before_today": 459,
+    "times_on_base_allowed": 151
+   }
+  },
+  "C": {
+   "part": "obp",
+   "date": "2026-06-01",
+   "population": "Completed plate appearances in MLB regular-season games in the 7th inning or later with first base empty and a runner on second and/or third. Intentional walks and catcher's interference are excluded. Success = the batter reaches base by a hit, walk or hit by pitch; anything else (including reaching on an error or a fielder's choice) = failure.",
+   "question": "Probability that the batter reaches base (success as defined).",
+   "league_this_season_before_today": {
+    "units": 66901,
+    "successes": 21087,
+    "success_rate_used": 0.315,
+    "note": "on-base rate (hit, walk, hit by pitch) of all completed plate appearances on earlier dates this season, excluding intentional walks and catcher's interference; the previous season's rate until the season has 2000 plate appearances"
+   },
+   "situation": {
+    "inning": 8,
+    "half": "top",
+    "outs": 2,
+    "runner_on_first": false,
+    "runner_on_second": true,
+    "runner_on_third": false,
+    "batting_team_score_minus_fielding_team_score": -5
+   },
+   "teams": {
+    "offense": "Chicago White Sox",
+    "defense": "Minnesota Twins"
+   },
+   "batter": {
+    "name": "Edgar Quero",
+    "plate_appearances_since_2021_before_today": 537,
+    "times_on_base_in_those_plate_appearances": 171
+   },
+   "pitcher": {
+    "name": "Yoendrys Gómez",
+    "batters_faced_since_2021_before_today": 459,
+    "times_on_base_allowed": 151
+   },
+   "statistical_model_estimate": {
+    "p_success": 0.308,
+    "what_it_is": "L2 logistic regression on the situation, the league rate and the shrunk records above; trained on this population from 2023-03-30 to the day before 2026-07-01."
+   }
+  }
+ }
+}
