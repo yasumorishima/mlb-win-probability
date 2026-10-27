@@ -10,8 +10,9 @@ pt = lambda x: f"{100 * x:+.1f}"
 ci = lambda d: f"{pt(d['diff'])} pt (95% {pt(d['ci95'][0])} to {pt(d['ci95'][1])})"
 L = ["# Results — Claude's bench calls vs the managers'", "",
      "Pre-registration: `PREREG.md` (frozen `78a0a97`, merged `7a98f7a`). Run once, in Claude Code cloud,",
-     f"model(s) {', '.join(r['answering_models'])}, Batches API. Cost: B ${r['cost_usd_batch']['B']:.2f}, "
-     f"C ${r['cost_usd_batch']['C']:.2f} (batch-priced from the recorded tokens).", "",
+     f"model(s) {', '.join(r['answering_models'])}, live Messages API calls (Amendment 1: the batches stalled "
+     f"and were cancelled unread). Cost from the recorded tokens at full price: B ${2 * r['cost_usd_batch']['B']:.2f}, "
+     f"C ${2 * r['cost_usd_batch']['C']:.2f} (analyze.py's `cost_usd_batch` is the batch rate, half of this).", "",
      "Agreement = the arm picked the player the manager actually sent in. It measures how much the picks look "
      "like real MLB managers' choices, not whether they were right.", "", "## Hypotheses (pitching changes)", ""]
 for name, h in r["hypotheses"].items():
