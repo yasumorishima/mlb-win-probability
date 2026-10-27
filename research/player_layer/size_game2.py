@@ -40,6 +40,7 @@ import pa_rates as R  # noqa: E402
 from size_context import ABBR  # noqa: E402
 from size_game import bullpen_counts, game_context, park_table  # noqa: E402
 from size_hand import add_hands, split_counts  # noqa: E402
+from rates_v2 import prior_class_counts_decay  # noqa: E402
 from size_pa import defense_counts  # noqa: E402
 from size_runs import game_boot  # noqa: E402
 from wp_engine import STATES, Engine, _occ, _state, fit_tables  # noqa: E402
@@ -79,8 +80,12 @@ def run_season(a) -> None:
     t0 = time.time()
     pa = R.lineup_slots(R.load_pa(a.states, SEASONS))
     pa = add_hands(pa, a.ctx)
-    bat = R.prior_class_counts(pa, "batter", C).set_index(["batter", "date"])
-    pit = R.prior_class_counts(pa, "pitcher", C).set_index(["pitcher", "date"])
+    if a.decay:   # size_decay.py: earlier seasons x 0.6 per season, shrinkage x 0.7
+        bat = prior_class_counts_decay(pa, "batter", C, 0.6).set_index(["batter", "date"])
+        pit = prior_class_counts_decay(pa, "pitcher", C, 0.6).set_index(["pitcher", "date"])
+    else:
+        bat = R.prior_class_counts(pa, "batter", C).set_index(["batter", "date"])
+        pit = R.prior_class_counts(pa, "pitcher", C).set_index(["pitcher", "date"])
     bat = dict(zip(bat.index, bat[C].to_numpy(float)))
     pit = dict(zip(pit.index, pit[C].to_numpy(float)))
     bsp = split_counts(pa, "batter", "phand").set_index(["batter", "phand", "date"])
@@ -158,9 +163,13 @@ def run_season(a) -> None:
             return v * 1e6                                  # huge count = the multiplier itself
         return dfn.get((fld, season, date), zero_bip)
 
+    prm = dict(Ly.PARAMS)
+    if a.decay:
+        prm.update({k: v * 0.7 for k, v in Ly.PARAMS.items() if k != "kd"})
+
     def mult(ids, pid, pcounts, fld, g, season, date, park, plat=True):
         m = Ly.multipliers(np.vstack([bat.get((b, date), zeros) for b in ids]), pcounts[None, :],
-                           defense(fld, g, season, date)[None, :], L, park=park)
+                           defense(fld, g, season, date)[None, :], L, prm=prm, park=park)
         return m * platoon(ids, pid, date) if plat else m
 
     out = np.empty(len(d))
@@ -211,6 +220,8 @@ def run_season(a) -> None:
             print("segments", n_seg, round(time.time() - t0), "s", flush=True)
     d["wp_new"] = out
     tag = {(0, 0): "starter", (1, 0): "hand", (0, 1): "align", (1, 1): "handalign"}[(int(a.hand), int(a.align))]
+    if a.decay:
+        tag += "decay"
     d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(a.out / f"game2_{tag}_{s}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
@@ -251,6 +262,7 @@ def main() -> None:
     ap.add_argument("--season", type=int)
     ap.add_argument("--hand", action="store_true")
     ap.add_argument("--align", action="store_true")
+    ap.add_argument("--decay", action="store_true")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     if a.season is None:
