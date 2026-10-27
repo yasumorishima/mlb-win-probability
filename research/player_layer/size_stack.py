@@ -75,8 +75,16 @@ def main() -> None:
     ap.add_argument("--states", type=Path, required=True)
     ap.add_argument("--game", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--alt", help="size_game2 tag (e.g. handdecay): use its wp_new as the player layer")
+    ap.add_argument("--alt-dir", type=Path)
     a = ap.parse_args()
     rows = pd.concat([pd.read_parquet(a.game / f"game_{s}.parquet") for s in SEASONS], ignore_index=True)
+    if a.alt:
+        alt = pd.concat([pd.read_parquet(a.alt_dir / f"game2_{a.alt}_{s}.parquet") for s in SEASONS], ignore_index=True)
+        rows = rows.merge(alt[["game_pk", "at_bat_index", "wp_new"]], on=["game_pk", "at_bat_index"], how="left")
+        assert rows.wp_new.notna().all()
+        rows["wp_v1"] = rows.wp_game
+        rows["wp_game"] = rows.wp_new
     pa = load_pa(a.states, [2021] + SEASONS)
     games = game_table(pa)
     ts = team_strength(games)
