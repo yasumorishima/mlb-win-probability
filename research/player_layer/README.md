@@ -77,10 +77,38 @@ not comparable as a test). Calibration by tenths is in
 `published/size_game.json`; predictions below 0.5 are still too high
 (0.1-0.2: 0.150 predicted vs 0.133 observed).
 
+## Second round (2026-10-27/28): handedness, starter length, fielders
+Same folds, 2022-2025, 2026 not read. Stats API data fetched with
+`fetch_context.py` (handedness of 2,944 players; starting fielders of
+every 2021-2025 game, 8.0 per team-game) into scratch, not committed.
+
+Plate-appearance level (multinomial log loss, vs V5 + park):
+| term | change (95%) |
+|---|---|
+| league platoon factor (batter side x pitcher hand) ** 0.5 | −0.00034 (−0.00039 to −0.00030) |
+| + own splits of batter and pitcher (k = 2000) | −0.00064 (−0.00071 to −0.00058) |
+| starting fielders' previous-season OAA (total, or infield / outfield) | 0 (best weight on the grid is 0; 57% of fielders have a previous-season OAA) |
+
+Win probability (733,260 PAs, Brier, vs the whole-game layer above = v1):
+| variant | Brier | vs v1 (95%) | 0.3-0.5 bias |
+|---|---|---|---|
+| v1 (starter through the 6th) | 0.155197 | | +1.84 pt |
+| starter: P(starter begins inning i \| inning now, his batters faced) from the training folds, starter / bullpen mixed | 0.155168 | −0.00003 (−0.00008 to +0.00002) | +1.91 pt |
+| starter + handedness | 0.155213 | +0.00002 (−0.00004 to +0.00007) | +1.80 pt |
+
+Reading: handedness sharpens the plate-appearance prediction (what a
+pinch-hit or pitching-change comparison uses) but does not change the
+game-level Brier; the starter-length model does not either. Neither
+interval excludes 0, so v1 stays the candidate for the win-probability
+test; handedness stays in the plate-appearance part for bench
+comparisons. Fielder-level OAA gave nothing measurable here; this is a
+null for this measure (previous-season OAA, starting alignment), not a
+statement that defense does not matter.
+
 ## Next
-1. Fielder-level defense from the real alignment.
-2. Sizing choices still open: starter exit inning (fixed at 6), bullpen
-   pooling, batter / pitcher handedness (not in the tables yet).
-3. Compare with the team layer on the same rows, then freeze a PREREG
-   and score 2026 once (2026 was already used for the team layer and the
-   steal study).
+1. Compare with the team layer on the same rows (the team layer was
+   fitted on 2021-2025, so only a 2026 comparison is fair), then freeze a
+   PREREG (player layer v1 vs engine and vs team layer) and score 2026
+   once; 2026 was already used for the team layer and the steal study.
+2. Bench use: per-option run distributions (pinch hitter / pitcher change
+   / bunt) with handedness, shown in the bench screen (task 3).
