@@ -37,6 +37,7 @@ SNAPSHOT = ROOT / "research/player_layer/published/bench_snapshot.json"
 MAX_PINCH, MAX_RELIEF = 6, 6
 
 LABEL_JA = {"none": "そのまま", "bunt": "送りバント", "intentional_walk": "敬遠"}
+MAX_RUN = 3
 
 
 @lru_cache(maxsize=1)
@@ -131,13 +132,16 @@ def moment_from_feed(feed: dict) -> tuple[B.Moment, B.Data, dict] | None:
                  pitcher=int(pitcher), fld_lineup=fld_lineup, fld_next=fld_next if fld_next is not None else 0,
                  bat_pitcher=int(bp), cur_is_starter=len(fld_pitchers) <= 1,
                  bat_pitcher_is_starter=len(bat_pitchers) <= 1,
-                 park=np.asarray(park) if park else None, extra_runner=bool(st.get("extra_runner", True)))
+                 park=np.asarray(park) if park else None, extra_runner=bool(st.get("extra_runner", True)),
+                 runner_ids=tuple((off.get(b) or {}).get("id") if off.get("team", {}).get("id") == bat_id else None
+                                  for b in ("first", "second", "third")))
     dec = s.get("decay")
     prm = None
     if dec and "bat_decay" in s:
         import layer as Ly
         prm = {k: (v * dec["k_scale"] if k != "kd" else v) for k, v in Ly.PARAMS.items()}
-    data = B.Data(L=L, bat=s["_bat"], pit=s["_pit"], prm=prm, pen_fld=pool(_ids(fld_box.get("bullpen"))),
+    data = B.Data(L=L, bat=s["_bat"], pit=s["_pit"], prm=prm,
+                  speed={int(k): v for k, v in s.get("speed", {}).items()}, speed_coef=s.get("speed_coef", {}), pen_fld=pool(_ids(fld_box.get("bullpen"))),
                   pen_bat=pool(_ids(bat_box.get("bullpen"))),
                   def_fld=np.asarray(s["dfn"].get(str(fld_team), [0, 0, 0, 0]), float),
                   def_bat=np.asarray(s["dfn"].get(str(bat_team), [0, 0, 0, 0]), float),
@@ -160,16 +164,26 @@ def bench_options(feed: dict, max_pinch: int = MAX_PINCH, max_relief: int = MAX_
         return None
     m, data, extra = got
     bench = _bench(m.extra_runner)
-    opts = bench.options(m, data, pinch_hitters=extra["bench"], relievers=extra["bullpen"])
+    opts = bench.options(m, data, pinch_hitters=extra["bench"], relievers=extra["bullpen"], pinch_runners=extra["bench"])
     nm = extra["names"]
     for o in opts:
         kind, _, pid = o["option"].partition(":")
         o["kind"] = kind
-        o["label_ja"] = LABEL_JA.get(kind) or (f"代打 {nm.get(int(pid), pid)}" if kind == "pinch_hit"
-                                               else f"継投 {nm.get(int(pid), pid)}")
+        if kind.startswith("steal_"):
+            who = nm.get(int(pid), "") if pid not in ("", "None") else ""
+            base = "二盗" if kind == "steal_2b" else "三盗"
+            o["label_ja"] = (f"{base}（{who} 成功見込み {o['p_success']:.0%} / 必要 {o['breakeven']:.0%}）"
+                             f"→ {'走れ' if o['go'] else '走るな'}")
+            o["label_en"] = (f"steal {kind[-2:]} ({who} est. {o['p_success']:.0%} / needed {o['breakeven']:.0%}) "
+                             f"-> {'go' if o['go'] else 'hold'}")
+            o["kind"] = "steal"
+            continue
+        o["label_ja"] = LABEL_JA.get(kind) or {"pinch_hit": "代打", "pinch_run": "代走", "pitch_change": "継投"}[kind] + \
+            f" {nm.get(int(pid), pid)}"
     ph = sorted([o for o in opts if o["kind"] == "pinch_hit"], key=lambda o: -o["wp_offense"])[:max_pinch]
     rp = sorted([o for o in opts if o["kind"] == "pitch_change"], key=lambda o: o["wp_offense"])[:max_relief]
-    offense = [o for o in opts if o["kind"] in ("none", "bunt")] + ph
+    pr = sorted([o for o in opts if o["kind"] == "pinch_run"], key=lambda o: -o["wp_offense"])[:MAX_RUN]
+    offense = [o for o in opts if o["kind"] in ("none", "bunt", "steal")] + ph + pr
     defense = [o for o in opts if o["kind"] == "intentional_walk"] + rp
     return {"offense": offense, "defense": defense, "batter": nm.get(extra["batter"], ""),
             "pitcher": nm.get(m.pitcher, ""), "records_through": extra["records_through"],

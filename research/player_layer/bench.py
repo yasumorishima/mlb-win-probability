@@ -62,6 +62,7 @@ class Moment:
     bat_pitcher_is_starter: bool
     park: np.ndarray | None = None  # class factors (7), 1.0 = average
     extra_runner: bool = True       # automatic runner in extra innings (not in the postseason)
+    runner_ids: tuple = (None, None, None)   # who is on 1st / 2nd / 3rd
 
 
 @dataclass
@@ -79,6 +80,8 @@ class Data:
     split_pit: dict = field(default_factory=dict)   # (id, batter side) -> counts (7)
     platoon: dict = field(default_factory=dict)     # "LvR" etc -> league factor (7)
     prm: dict | None = None                         # shrinkage (layer.PARAMS when None)
+    speed: dict = field(default_factory=dict)       # id -> sprint speed z (previous season)
+    speed_coef: dict = field(default_factory=dict)  # size_speed.py: E1 / E2 / E3 / SB coefficients
 
 
 def _counts(d: dict, k) -> np.ndarray:
@@ -114,12 +117,47 @@ def _mult(data: Data, ids, pid, pcounts, dfn, park) -> np.ndarray:
     return m * _platoon(data, ids, pid)
 
 
+def _speed_T(T: np.ndarray, base: int, dz: float, coef: dict) -> np.ndarray:
+    """Per-class transitions with the runner on `base` (1 or 2) dz standard
+    deviations faster than league average: the odds of the extra base
+    (size_speed.py E1 / E2 / E3) are multiplied by exp(beta * dz)."""
+    T = T.copy()
+    fams = []
+    if base == 2:     # E1: single, runner on 2nd, 3rd empty -> he scores
+        fams.append((C.index("1B"), lambda st: st[2] == 1 and st[3] == 0, lambda nxt, r: r >= 1, coef["E1"]["speed_z"]))
+    if base == 1:     # E2: single, runner on 1st, 2nd/3rd empty -> 3rd or home; E3: double -> home
+        fams.append((C.index("1B"), lambda st: st[1] == 1 and st[2] == 0 and st[3] == 0,
+                     lambda nxt, r: r >= 1 or (nxt != END and nxt[3] == 1), coef["E2"]["speed_z"]))
+        fams.append((C.index("2B"), lambda st: st[1] == 1 and st[2] == 0 and st[3] == 0,
+                     lambda nxt, r: r >= 1, coef["E3"]["speed_z"]))
+    for ci, in_fam, extra, beta in fams:
+        for si, st in enumerate(STATES):
+            if not in_fam(st):
+                continue
+            ext = np.zeros((T.shape[1], T.shape[3]), dtype=bool)
+            for r in range(T.shape[1]):
+                for j in range(T.shape[3]):
+                    nxt = END if j == len(STATES) else STATES[j]
+                    ext[r, j] = extra(nxt, r)
+            row = T[ci, :, si, :]
+            pe = row[ext].sum()
+            tot = row.sum()
+            if tot <= 0 or pe <= 0 or pe >= tot:
+                continue
+            q = pe / tot
+            q2 = 1 / (1 + (1 - q) / q * np.exp(-beta * dz))
+            row = np.where(ext, row * (q2 / q), row * ((1 - q2) / (1 - q)))
+            T[ci, :, si, :] = row
+    return T
+
+
 class Bench:
     def __init__(self, eng: Engine, ct: dict, unit: bool = False):
         self.eng, self.ct, self.unit = eng, ct, unit      # unit=True: every multiplier 1 (gate)
 
-    def _dist(self, half, M):
-        return Ly.run_dist(self.ct, half, np.ones_like(M) if self.unit else M)
+    def _dist(self, half, M, T=None):
+        ct = self.ct if T is None else {**self.ct, half: {"P": self.ct[half]["P"], "T": T}}
+        return Ly.run_dist(ct, half, np.ones_like(M) if self.unit else M)
 
     def later_halves(self, m: Moment, data: Data, lineup) -> dict:
         """H table for the later half-innings (v1 rules) with `lineup` for
@@ -153,7 +191,7 @@ class Bench:
             tot += p * sh
         return tot
 
-    def options(self, m: Moment, data: Data, pinch_hitters=(), relievers=()) -> list[dict]:
+    def options(self, m: Moment, data: Data, pinch_hitters=(), relievers=(), pinch_runners=()) -> list[dict]:
         s = _state(m.outs, *m.bases)
         si = STATES.index(s)
         base_cur = _mult(data, m.lineup, m.pitcher, _counts(data.pit, m.pitcher), data.def_fld, m.park)
@@ -179,6 +217,63 @@ class Bench:
             lu = list(m.lineup); lu[m.slot] = x
             d2 = self._dist(m.half, _mult(data, lu, m.pitcher, _counts(data.pit, m.pitcher), data.def_fld, m.park))
             add(f"pinch_hit:{x}", "offense", np.clip(d2[m.slot, si], 0, None), self.later_halves(m, data, lu))
+        # steal: success / failure with the same batter up; the runner's chance from size_speed.py (SB)
+        sb = data.speed_coef.get("SB")
+        for frm, to in ((1, 2), (2, 3)):
+            if not m.bases[frm - 1] or m.bases[to - 1] or not sb:
+                continue
+            b_ok = list(m.bases); b_ok[frm - 1] = 0; b_ok[to - 1] = 1
+            b_out = list(m.bases); b_out[frm - 1] = 0
+            ok = self._from(dist, m.slot, [(_state(m.outs, *b_ok), 0, 1.0)])
+            out = self._from(dist, m.slot, [(_state(m.outs + 1, *b_out), 0, 1.0)])
+            w_ok = G.wp_now(ok / ok.sum(), m.inning, m.half, m.diff, m.sched, H)
+            w_out = G.wp_now(out / out.sum(), m.inning, m.half, m.diff, m.sched, H)
+            w_now = G.wp_now(np.clip(dist[m.slot, si], 0, None) / np.clip(dist[m.slot, si], 0, None).sum(),
+                             m.inning, m.half, m.diff, m.sched, H)
+            if m.half == "top":
+                w_ok, w_out, w_now = 1 - w_ok, 1 - w_out, 1 - w_now
+            rid = m.runner_ids[frm - 1]
+            z = data.speed.get(rid)
+            zz = sb["intercept"] + sb["x2"] * (to == 3) + (sb["speed_z"] * z if z is not None else sb["missing"])
+            p = 1 / (1 + np.exp(-zz))
+            be = (w_now - w_out) / (w_ok - w_out) if w_ok > w_out else 1.0
+            mix = p * ok / ok.sum() + (1 - p) * out / out.sum()
+            add(f"steal_{to}b:{rid}", "offense", mix, H)
+            res[-1].update({"p_success": float(p), "breakeven": float(min(max(be, 0.0), 1.0)), "go": bool(p > be)})
+        # pinch runner: faster runner on the base whose extra bases are modelled (2nd with 3rd empty, else
+        # 1st with 2nd / 3rd empty); he also takes the runner's place in the lineup
+        if pinch_runners and data.speed_coef.get("E1"):
+            base = 2 if (m.bases[1] and not m.bases[2]) else (1 if (m.bases[0] and not m.bases[1] and not m.bases[2]) else None)
+            rid = m.runner_ids[base - 1] if base else None
+            if base and rid is not None:
+                z0 = data.speed.get(rid, 0.0) or 0.0
+                T0 = _speed_T(self.ct[m.half]["T"], base, z0, data.speed_coef)
+                w0 = None
+                for x in pinch_runners:
+                    zx = data.speed.get(x)
+                    if zx is None or zx <= z0:
+                        continue
+                    lu = list(m.lineup)
+                    if rid in lu:
+                        lu[lu.index(rid)] = x
+                    Tx = _speed_T(self.ct[m.half]["T"], base, zx, data.speed_coef)
+                    Mx = _mult(data, lu, m.pitcher, _counts(data.pit, m.pitcher), data.def_fld, m.park)
+                    if w0 is None:
+                        d0 = self._dist(m.half, base_cur, T0)
+                        w0 = G.wp_now(np.clip(d0[m.slot, si], 0, None) / np.clip(d0[m.slot, si], 0, None).sum(),
+                                      m.inning, m.half, m.diff, m.sched, H)
+                    dx = self._dist(m.half, Mx, Tx)
+                    Hx = self.later_halves(m, data, lu)
+                    wx = G.wp_now(np.clip(dx[m.slot, si], 0, None) / np.clip(dx[m.slot, si], 0, None).sum(),
+                                  m.inning, m.half, m.diff, m.sched, Hx)
+                    if m.half == "top":
+                        dw = (1 - wx) - (1 - w0)
+                    else:
+                        dw = wx - w0
+                    runs = np.clip(dx[m.slot, si], 0, None)
+                    res.append({"option": f"pinch_run:{x}", "side": "offense", "runs_mean": float(RUNS @ runs / runs.sum()),
+                                "p_score": float(1 - runs[0] / runs.sum()), "wp_offense": res[0]["wp_offense"] + float(dw),
+                                "speed_gain_sd": float(zx - z0), "replaces": rid})
         H_pen = self.later_halves(replace(m, cur_is_starter=False), data, m.lineup) if relievers else None
         for rp in relievers:                            # the starter is gone: later halves face the bullpen
             d2 = self._dist(m.half, _mult(data, m.lineup, rp, _counts(data.pit, rp), data.def_fld, m.park))

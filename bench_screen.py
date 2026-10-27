@@ -138,7 +138,7 @@ def _panel(lang: str) -> None:
             st.caption(t["cannot"])
     if opts:
         def rows(o):
-            return [{t["opt"]: x["label_ja"] if lang == "JA" else x["option"], t["runs"]: round(x["runs_mean"], 2),
+            return [{t["opt"]: x["label_ja"] if lang == "JA" else x.get("label_en", x["option"]), t["runs"]: round(x["runs_mean"], 2),
                      t["score"]: f"{x['p_score']:.0%}", t["owp"]: f"{x['wp_offense']:.1%}",
                      t["delta"]: f"{100 * x['delta_wp_offense']:+.1f}"} for x in o]
         a, b = st.columns(2)
