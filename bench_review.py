@@ -32,7 +32,7 @@ TXT = {
            "records": "選手の成績は {d} まで（この試合の前年まで。後から分かった成績は使っていません）。",
            "loading": "試合を読み込み中…", "cannot": "この局面は再現できませんでした（打順が読み取れません）。",
            "tap": "グラフの点をタップしても局面を移れます。",
-           "limits": "継投の値は、交代した投手がこの回を投げ、その後はブルペン全体の平均が投げるとして計算しています（序盤の継投は大きく出やすい）。",
+           "limits": "継投の値は、交代した投手がこの回を投げ、7 回以降はそのチームの直近 30 日の起用（今の点差での使い分け。その投手と、この試合で投げた投手、2 日連続登板の投手を除く）、6 回まではブルペン全体の平均が投げるとして計算しています（序盤の継投は大きく出やすい）。",
            "views": ["⚾ 局面", "📝 試合のまとめ"], "view": "表示",
            "not_rated2": "対象外",
            "sum_head": "{team}：采配 {n} 回（評価できたもの {r} 回）　モデルの最善と一致 {a} 回　プラス評価 {p} 回",
@@ -42,7 +42,7 @@ TXT = {
            "sum_note": "モデル評価＝打席の前に、その采配で采配したチームの勝率が「何もしない」よりどれだけ上がると見ていたか（ポイント）。"
                        "結果と勝率の変化は、実際に起きたこと（運を含む）。両者は別物です。"
                        "「対象外」＝前年の記録がない選手か、モデルが扱わない場面（満塁の代走など）。守備位置・休養・故障などはモデルに入っていません。",
-           "miss_btn": "🔎 モデルならここで動いた、という場面を探す（約 20 秒）",
+           "miss_btn": "🔎 モデルならここで動いた、という場面を探す（約 30 秒）",
            "miss_head": "モデルが 1 ポイント以上の上積みを見ていたのに、その種類の采配がなかった場面（大きい順）",
            "miss_none": "そのような場面はありませんでした（基準：1 ポイント以上）。",
            "miss_row": "{inn}　{team}：{opt}　{g:+.1f} ポイント",
@@ -55,7 +55,7 @@ TXT = {
            "records": "Player records through {d} (the season before this game: no hindsight).",
            "loading": "Loading the game…", "cannot": "This moment could not be rebuilt (lineups unreadable).",
            "tap": "Tap a point on the chart to jump there.",
-           "limits": "A pitching change assumes the new pitcher finishes this half and the pooled bullpen pitches after it (early changes look large).",
+           "limits": "A pitching change assumes the new pitcher finishes this half; from the 7th the team's usage over the last 30 days at the current score pitches (without him, pitchers already used and anyone who pitched on both previous days), before that the pooled bullpen (early changes look large).",
            "views": ["⚾ Moment", "📝 Game summary"], "view": "View",
            "not_rated2": "not rated",
            "sum_head": "{team}: {n} calls ({r} rated), matched the model's best {a}, positive {p}",
@@ -64,7 +64,7 @@ TXT = {
            "sum_pick": "Pick a row to jump to that moment.",
            "sum_note": "Model = how many WP points the model expected the call to add for the team that made it, before the play. "
                        "Result and WP change are what happened (luck included); they are different things. 'not rated' = no previous-season record, or a situation the model does not cover (e.g. a pinch runner with the bases loaded). Positions, rest and injuries are not in the model.",
-           "miss_btn": "🔎 Find moments where the model would have moved (about 20 s)",
+           "miss_btn": "🔎 Find moments where the model would have moved (about 30 s)",
            "miss_head": "Moments where the model saw a gain of 1 point or more and no call of that kind was made (largest first)",
            "miss_none": "None (threshold: 1 point).",
            "miss_row": "{inn}  {team}: {opt}  {g:+.1f} pt",

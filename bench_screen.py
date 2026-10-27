@@ -34,7 +34,7 @@ T = {
            "options": "作戦", "off": "攻撃側", "def": "守備側", "opt": "選択肢", "runs": "この回の得点期待値",
            "score": "1点以上", "owp": "攻撃側の勝率", "delta": "差（ポイント）",
            "note": "勝率の見出しはエンジン＋チーム補正、「選手込み」と作戦の値は選手を入れた層（事前登録して 2026 年で確認）。"
-                   "選手の成績は {d} まで。代走・守備固め・この回より先の継投は考えていません。"},
+                   "選手の成績は {d} まで。守備固めは考えていません。7 回以降の救援は、2022〜2026 年の試合ではそのチームの直近 30 日の起用から、それ以外はブルペン全体の平均で計算しています。"},
     "EN": {"title": "📋 Bench", "pick": "Game", "none": "No games today.", "reload": "Reload schedule",
            "follow": "Follow (every 30 s)", "updated": "Updated {t} UTC", "failed": "Fetch failed (last success {t} UTC)",
            "top": "Top", "bot": "Bot", "outs": "out", "wp": "{team} win prob.", "player": "with players", "li": "Leverage",
@@ -43,8 +43,8 @@ T = {
            "options": "Options", "off": "Offense", "def": "Defense", "opt": "Option", "runs": "Runs this half",
            "score": "P(score)", "owp": "Offense WP", "delta": "Change (pt)",
            "note": "Headline WP: engine + team layer; 'with players' and the options: the player layer (pre-registered, "
-                   "confirmed on 2026). Player records through {d}. Pinch runners, defensive subs and relief beyond this half "
-                   "are not modelled."},
+                   "confirmed on 2026). Player records through {d}. Defensive subs are not modelled. Relief from the 7th: the team's "
+                   "usage over the last 30 days for 2022-2026 games, otherwise the pooled bullpen."},
 }
 
 
@@ -114,6 +114,23 @@ def _panel(lang: str) -> None:
     _draw(lang, s, c.get("options"), c.get("matchups"), c.get("series") or [])
 
 
+def _plan_html(plan: list, lang: str, s: dict) -> str:
+    """Who the model expects to pitch the late innings for the fielding team."""
+    ja = lang == "JA"
+    fld = s["home_team"] if s["top_bottom"] == "top" else s["away_team"]
+    head = (f"終盤の継投の見込み（守備側 {fld}：直近 30 日の起用と今の点差から。今の投手を除く）" if ja else
+            f"Expected late-inning arms for {fld} (usage over the last 30 days at the current score; current pitcher excluded)")
+    lines = []
+    for r in plan:
+        parts = [f"{html.escape(n)} <b>{x:.0%}</b>" for n, x in r["rows"]]
+        parts.append(("その他 " if ja else "others ") + f"{r['other']:.0%}")
+        inn = f"{r['inning']}回" if ja else f"{r['inning']}th"
+        lines.append(f'<div style="margin:2px 0"><span style="display:inline-block;width:3.2em;color:#c3c2b7">{inn}</span>'
+                     + " · ".join(parts) + "</div>")
+    return (f'<div style="background:#141428;border-radius:10px;padding:10px 14px;margin:6px 0;color:#f0efec;font-size:14px">'
+            f'<div style="color:#c3c2b7;font-size:12px;margin-bottom:4px">{head}</div>{"".join(lines)}</div>')
+
+
 def _draw(lang: str, s: dict, opts: dict | None, mu: dict | None, series: list, mark_i: int | None = None,
           chart_key: str | None = None):
     """The bench screen's cards and charts for one game moment (live or replayed).
@@ -181,6 +198,10 @@ def _draw(lang: str, s: dict, opts: dict | None, mu: dict | None, series: list, 
         with b:
             st.plotly_chart(bench_viz.fig_options(opts["defense"], lang, t["def"] + f"（{opts['pitcher']}）"),
                             width="stretch", config={"displayModeBar": False})
+
+        plan = opts.get("pen_plan")
+        if plan:
+            st.markdown(_plan_html(plan, lang, s), unsafe_allow_html=True)
 
         def rows(o):
             return [{t["opt"]: x["label_ja"] if lang == "JA" else x.get("label_en", x["option"]), t["runs"]: round(x["runs_mean"], 2),
