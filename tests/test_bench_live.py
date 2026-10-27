@@ -51,6 +51,11 @@ def test_moment_read_from_feed():
     assert m.slot == 4 and m.fld_next == 2
     assert not set(extra["bullpen"]) & set(STARTERS)          # starters are not offered as relievers
     assert len(extra["bullpen"]) == 3
+    # season-decayed records and the matching shrinkage (size_decay.py) are used
+    import layer as Ly
+    assert data.prm["kb1"] == pytest.approx(0.7 * Ly.PARAMS["kb1"]) and data.prm["kd"] == Ly.PARAMS["kd"]
+    b = m.lineup[0]
+    assert data.bat[b].sum() < SNAP["_bat_all"][b].sum()
 
 
 def test_options_shape_and_signs():
