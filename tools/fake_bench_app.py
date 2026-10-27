@@ -6,6 +6,7 @@ the bench screen without a live game or network (cloud screenshots).
   FAKE_FEED=<prepared.json> streamlit run tools/fake_bench_app.py --server.headless true
 
 <feed.json> = /api/v1.1/game/<pk>/feed/live of a finished game (not committed).
+FAKE_FEED=<feed.json> (unprepared, status Final) serves it for the look-back view.
 """
 
 import copy
@@ -38,6 +39,8 @@ def prepare(src: str, k: int) -> dict:
             if key in prev["matchup"]:
                 off[b] = prev["matchup"][key]
     f["liveData"]["linescore"]["offense"] = off
+    f["liveData"]["linescore"]["teams"] = {"home": {"runs": prev["result"]["homeScore"]},
+                                           "away": {"runs": prev["result"]["awayScore"]}}
     f["liveData"]["linescore"]["defense"] = {"batter": {"id": 0}, "team": {"id": f["gameData"]["teams"][fld]["id"]}}
     return f
 
@@ -51,8 +54,9 @@ else:
     import live_feed
     FEED = json.load(open(os.environ["FAKE_FEED"]))
     gd = FEED["gameData"]
+    status = gd["status"]["detailedState"]         # a finished game's full feed -> look-back mode
     live_feed.get_todays_games = lambda date=None: [{"gamePk": gd["game"]["pk"], "away_team": gd["teams"]["away"]["name"],
-                                                     "home_team": gd["teams"]["home"]["name"], "status": "In Progress",
+                                                     "home_team": gd["teams"]["home"]["name"], "status": status,
                                                      "start_time_utc": ""}]
     bench_live.get_feed = lambda pk: FEED
     app = ROOT / "streamlit_app.py"

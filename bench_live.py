@@ -40,9 +40,9 @@ LABEL_JA = {"none": "そのまま", "bunt": "送りバント", "intentional_walk
 MAX_RUN = 3
 
 
-@lru_cache(maxsize=1)
-def _snapshot() -> dict:
-    s = json.loads(SNAPSHOT.read_text())
+@lru_cache(maxsize=8)
+def _snapshot(path: str | None = None) -> dict:
+    s = json.loads((Path(path) if path else SNAPSHOT).read_text())
     arr = lambda d: {int(k): np.asarray(v, float) for k, v in d.items()}
     s["_bat_all"], s["_pit_all"] = arr(s["bat"]), arr(s["pit"])
     # season-decayed records (size_decay.py); the bullpen pool and roles use them too
@@ -52,6 +52,14 @@ def _snapshot() -> dict:
     s["_ct"] = {h: {"P": np.asarray(v["P"]), "T": np.asarray(v["T"])} for h, v in s["class_tables"].items()}
     s["_hands"] = {int(k): tuple(v) for k, v in s["hands"].items()}
     return s
+
+
+def snapshot_for_season(season: int) -> str | None:
+    """Records known before a game of `season`: the snapshot that ends with
+    the previous season (looking back at past games without hindsight);
+    the latest snapshot for the current season."""
+    f = SNAPSHOT.parent / f"bench_snapshot_{season - 1}.json"
+    return str(f) if f.exists() else None
 
 
 @lru_cache(maxsize=2)
@@ -117,6 +125,21 @@ def moment_from_feed(feed: dict) -> tuple[B.Moment, B.Data, dict] | None:
     bp = bat_pitchers[-1] if bat_pitchers else gd.get("probablePitchers", {}).get(bat_side, {}).get("id")
     if pitcher is None or bp is None:
         return None
+    fld_pitchers, bat_pitchers = _ids(fld_box.get("pitchers")), _ids(bat_box.get("pitchers"))
+    runner_ids = tuple((off.get(b) or {}).get("id") if off.get("team", {}).get("id") == bat_id else None
+                       for b in ("first", "second", "third"))
+    return assemble(feed, st, s, half=half, lineup=lineup, slot=slot, batter=int(batter), fld_lineup=fld_lineup,
+                    fld_next=fld_next, pitcher=int(pitcher), bat_pitcher=int(bp),
+                    cur_is_starter=len(fld_pitchers) <= 1, bat_pitcher_is_starter=len(bat_pitchers) <= 1,
+                    bench=_ids(bat_box.get("bench")), bullpen_fld=_ids(fld_box.get("bullpen")),
+                    bullpen_bat=_ids(bat_box.get("bullpen")), fld_team=fld_box.get("team", {}).get("id"),
+                    bat_team=bat_id, runner_ids=runner_ids)
+
+
+def assemble(feed: dict, st: dict, s: dict, *, half, lineup, slot, batter, fld_lineup, fld_next, pitcher, bat_pitcher,
+             cur_is_starter, bat_pitcher_is_starter, bench, bullpen_fld, bullpen_bat, fld_team, bat_team, runner_ids):
+    """Moment + Data + extra from the pieces of a game moment (live or replayed)."""
+    gd = feed.get("gameData", {})
     home_abbr = s["team_abbr"].get(str(gd.get("teams", {}).get("home", {}).get("id")))
     park = s["park"].get(home_abbr)
     L = np.asarray(s["L"])
@@ -126,40 +149,39 @@ def moment_from_feed(feed: dict) -> tuple[B.Moment, B.Data, dict] | None:
         tot = sum((s["_pit"].get(i, zeros) for i in ids), zeros.copy())
         return tot if tot.sum() > 0 else L * 2000          # unknown arms: league average
 
-    fld_team, bat_team = fld_box.get("team", {}).get("id"), bat_id
     m = B.Moment(inning=st["inning"], half=half, outs=st["outs"], bases=tuple(st["runners"]),
                  diff=st["score_diff"], sched=st["scheduled_innings"], lineup=lineup, slot=slot,
                  pitcher=int(pitcher), fld_lineup=fld_lineup, fld_next=fld_next if fld_next is not None else 0,
-                 bat_pitcher=int(bp), cur_is_starter=len(fld_pitchers) <= 1,
-                 bat_pitcher_is_starter=len(bat_pitchers) <= 1,
+                 bat_pitcher=int(bat_pitcher), cur_is_starter=cur_is_starter,
+                 bat_pitcher_is_starter=bat_pitcher_is_starter,
                  park=np.asarray(park) if park else None, extra_runner=bool(st.get("extra_runner", True)),
-                 runner_ids=tuple((off.get(b) or {}).get("id") if off.get("team", {}).get("id") == bat_id else None
-                                  for b in ("first", "second", "third")))
+                 runner_ids=tuple(runner_ids))
     dec = s.get("decay")
     prm = None
     if dec and "bat_decay" in s:
         import layer as Ly
         prm = {k: (v * dec["k_scale"] if k != "kd" else v) for k, v in Ly.PARAMS.items()}
     data = B.Data(L=L, bat=s["_bat"], pit=s["_pit"], prm=prm,
-                  speed={int(k): v for k, v in s.get("speed", {}).items()}, speed_coef=s.get("speed_coef", {}), pen_fld=pool(_ids(fld_box.get("bullpen"))),
-                  pen_bat=pool(_ids(bat_box.get("bullpen"))),
+                  speed={int(k): v for k, v in s.get("speed", {}).items()}, speed_coef=s.get("speed_coef", {}),
+                  pen_fld=pool(bullpen_fld), pen_bat=pool(bullpen_bat),
                   def_fld=np.asarray(s["dfn"].get(str(fld_team), [0, 0, 0, 0]), float),
                   def_bat=np.asarray(s["dfn"].get(str(bat_team), [0, 0, 0, 0]), float),
                   hands=_hand_from_feed(feed, s["_hands"]), split_bat=s["_bat_vs"], split_pit=s["_pit_vs"],
                   platoon={k: np.asarray(v) for k, v in s["platoon"].items()})
     names = {int(p["id"]): p.get("fullName", str(p["id"])) for p in gd.get("players", {}).values() if "id" in p}
     role = s.get("role", {})
-    relievers = [i for i in _ids(fld_box.get("bullpen"))
-                 if (r := role.get(str(i))) is None or r[0] * 2 < r[1]]   # mostly relief work in 2025-2026 (unknown: kept)
-    extra = {"bench": _ids(bat_box.get("bench")), "bullpen": relievers, "names": names,
+    relievers = [i for i in bullpen_fld
+                 if (r := role.get(str(i))) is None or r[0] * 2 < r[1]]   # mostly relief work in the last two seasons (unknown: kept)
+    extra = {"bench": list(bench), "bullpen": relievers, "names": names,
              "state": st, "batter": int(batter), "records_through": s["records_through"]}
     return m, data, extra
 
 
-def bench_options(feed: dict, max_pinch: int = MAX_PINCH, max_relief: int = MAX_RELIEF) -> dict | None:
+def bench_options(feed: dict, max_pinch: int = MAX_PINCH, max_relief: int = MAX_RELIEF, got=None) -> dict | None:
     """Every option with the rest-of-half expected runs, the chance of
-    scoring and the offense's WP; the best pinch hitters / relievers first."""
-    got = moment_from_feed(feed)
+    scoring and the offense's WP; the best pinch hitters / relievers first.
+    `got`: a prepared (Moment, Data, extra), e.g. from bench_replay.moment_at."""
+    got = got or moment_from_feed(feed)
     if got is None:
         return None
     m, data, extra = got
@@ -185,16 +207,16 @@ def bench_options(feed: dict, max_pinch: int = MAX_PINCH, max_relief: int = MAX_
     pr = sorted([o for o in opts if o["kind"] == "pinch_run"], key=lambda o: -o["wp_offense"])[:MAX_RUN]
     offense = [o for o in opts if o["kind"] in ("none", "bunt", "steal")] + ph + pr
     defense = [o for o in opts if o["kind"] == "intentional_walk"] + rp
-    return {"offense": offense, "defense": defense, "batter": nm.get(extra["batter"], ""),
+    return {"offense": offense, "defense": defense, "all": opts, "batter": nm.get(extra["batter"], ""),
             "pitcher": nm.get(m.pitcher, ""), "records_through": extra["records_through"],
             "state": extra["state"]}
 
 
-def matchups(feed: dict, n_next: int = 3) -> dict | None:
+def matchups(feed: dict, n_next: int = 3, got=None) -> dict | None:
     """The current batter and the next `n_next` against the current pitcher:
     the plate-appearance outcome probabilities of the player layer in this
     base-out state (handedness included)."""
-    got = moment_from_feed(feed)
+    got = got or moment_from_feed(feed)
     if got is None:
         return None
     m, data, extra = got

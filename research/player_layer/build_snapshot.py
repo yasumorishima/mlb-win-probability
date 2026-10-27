@@ -54,8 +54,11 @@ def main() -> None:
     ap.add_argument("--hf", type=Path, required=True)
     ap.add_argument("--ctx", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--last-season", type=int, default=2026,
+                    help="records end with this season (a snapshot for looking back at games of the next season)")
     a = ap.parse_args()
-    pa = R.lineup_slots(R.load_pa(a.states, range(2021, 2027)))
+    LAST = a.last_season
+    pa = R.lineup_slots(R.load_pa(a.states, range(2021, LAST + 1)))
     pa = add_hands(pa, a.ctx)
     pa = game_context(pa)
     done = pa[pa.cls.isin(C) & pa.pa_complete]
@@ -65,15 +68,15 @@ def main() -> None:
     t = train[train.cls.isin(C) & train.pa_complete]
     L = t.cls.value_counts(normalize=True).reindex(C).to_numpy()
     F = pd.crosstab(t.combo, t.cls, normalize="index").reindex(columns=C) / L
-    s26 = done[done.season == 2026]
+    s26 = done[done.season == LAST]
     pen = counts(s26[s26.is_relief], ["fld_team"])
     bip = s26[s26.cls.isin(R.BIP)]
     dfn = pd.crosstab(bip.fld_team, bip.cls).reindex(columns=R.BIP, fill_value=0)
     pf = pd.read_parquet(a.hf / "park_factors.parquet")
     pf["team"] = pf.team.replace({"WAS": "WSH"})
     park = {}
-    for r in pf[pf.season == 2026].itertuples():
-        if r.team in ("OAK", "TB"):
+    for r in pf[pf.season == LAST].itertuples():
+        if r.team in ("OAK", "TB") and LAST >= 2025:      # new home parks inside the 3-year window
             continue
         v = []
         for c in C:
@@ -82,7 +85,7 @@ def main() -> None:
         park[r.team] = v
     hands = pd.read_parquet(a.ctx / "hands.parquet")
     # role: starts and relief appearances in 2025-2026 (relievers only are offered as pitching changes)
-    app = pa[pa.season >= 2025].groupby(["game_pk", "fld_team", "pitcher"], sort=False).cur_is_starter.first().reset_index()
+    app = pa[pa.season >= LAST - 1].groupby(["game_pk", "fld_team", "pitcher"], sort=False).cur_is_starter.first().reset_index()
     role = app.groupby("pitcher").cur_is_starter.agg(["sum", "size"])
     # season decay (size_decay.py: earlier seasons x 0.6 each, shrinkage x 0.7), as seen from the
     # season after the last one in the tables: the latest season weighs 0.6, the one before 0.36, ...
@@ -94,14 +97,14 @@ def main() -> None:
     # runner speed (size_speed.py): latest-season sprint speed as z, and the fitted coefficients
     spd = pd.read_parquet(a.hf / "sprint_speed.parquet")
     sz = json.loads((HERE / "published/size_speed.json").read_text())
-    latest = spd.sort_values("season").groupby("player_id").tail(1)
+    latest = spd[spd.season <= LAST].sort_values("season").groupby("player_id").tail(1)
     speed = {str(int(r.player_id)): round((r.sprint_speed - sz["speed_mean"]) / sz["speed_sd"], 3) for r in latest.itertuples()}
     speed_coef = {k: v["coef_all_2021_2025"] for k, v in sz["events"].items()}
     snap = {
         "classes": C, "bip": R.BIP, "records_through": str(done.date.max().date()),
         "bat": {str(k): v.tolist() for k, v in zip(counts(done, ["batter"]).index, counts(done, ["batter"]).to_numpy())},
         "pit": {str(k): v.tolist() for k, v in zip(counts(done, ["pitcher"]).index, counts(done, ["pitcher"]).to_numpy())},
-        "speed": speed, "speed_coef": speed_coef, "speed_through": int(spd.season.max()),
+        "speed": speed, "speed_coef": speed_coef, "speed_through": int(spd[spd.season <= LAST].season.max()), "last_season": LAST,
         "bat_decay": wcounts("batter"), "pit_decay": wcounts("pitcher"), "decay": {"lam": 0.6, "k_scale": 0.7},
         "bat_vs": {f"{b}|{h}": v.tolist() for (b, h), v in zip(counts(done, ["batter", "phand"]).index, counts(done, ["batter", "phand"]).to_numpy())},
         "pit_vs": {f"{p}|{h}": v.tolist() for (p, h), v in zip(counts(done, ["pitcher", "bside"]).index, counts(done, ["pitcher", "bside"]).to_numpy())},
