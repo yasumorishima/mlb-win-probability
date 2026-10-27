@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 import time
 from pathlib import Path
@@ -151,7 +152,7 @@ def predict(a) -> None:
     for c, v in out.items():
         d[c] = v
     a.out.mkdir(parents=True, exist_ok=True)
-    keep = ["game_pk", "at_bat_index", "inning", "half", "outs", "scheduled_innings",
+    keep = ["game_pk", "at_bat_index", "inning", "half", "outs", "scheduled_innings", "diff",
             "wp_player", "wp_engine", "p1_player", "p1_engine"]
     d[keep].to_parquet(a.out / f"pred_{target}_part{k}.parquet", index=False)
     print("part", a.part, "rows", len(d), round(time.time() - t0), "s", flush=True)
@@ -176,41 +177,74 @@ def calib(p, y):
              "obs": float(y[b == k].mean()) if (b == k).any() else None} for k in range(10)]
 
 
+def verify_frozen(required: bool) -> dict:
+    """md5 of every file listed under "Frozen files" in PREREG.md (lines
+    `<md5>  <repo-relative path>`); the real run requires Status: FROZEN
+    and every md5 to match."""
+    text = (HERE / "PREREG.md").read_text()
+    listed = re.findall(r"^([0-9a-f]{32})  (\S+)$", text, flags=re.M)
+    got = {path: md5(ROOT / path) for _, path in listed}
+    bad = {path: got[path] for m, path in listed if got[path] != m}
+    frozen = re.search(r"^Status: FROZEN", text, flags=re.M) is not None
+    if required and (not frozen or not listed or bad):
+        sys.exit(f"frozen check failed: status FROZEN={frozen}, listed={len(listed)}, mismatched={bad}")
+    return {"status_frozen": frozen, "n_listed": len(listed), "mismatched": bad,
+            "prereg_md5": md5(HERE / "PREREG.md"), "script_md5": md5(Path(__file__))}
+
+
 def score(a) -> None:
-    check_inputs(a.states, None if a.dry else a.hf)
+    check_inputs(a.states, a.hf)
     target = 2025 if a.dry else 2026
-    pred = pd.concat([pd.read_parquet(a.out / f"pred_{target}_part{k}.parquet") for k in range(4)], ignore_index=True)
+    res = {"target": target, "frozen": verify_frozen(required=not a.dry),
+           "versions": {"python": sys.version.split()[0], "numpy": np.__version__, "pandas": pd.__version__}}
+    parts = [pd.read_parquet(a.out / f"pred_{target}_part{k}.parquet") for k in range(4)]
+    pred = pd.concat(parts, ignore_index=True)
+    if pred.duplicated(["game_pk", "at_bat_index"]).any():
+        sys.exit("duplicate rows across parts")
+    for c in ("wp_player", "wp_engine", "p1_player", "p1_engine"):
+        if not np.isfinite(pred[c].to_numpy()).all():
+            sys.exit(f"non-finite values in {c}")
+    if not a.dry:
+        # gate BEFORE any outcome is loaded: the recomputed engine equals the
+        # published p_ENGINE where both clip the score the same way (|diff| <= 15)
+        team = pd.read_parquet(TEAM_FILE, columns=["game_pk", "at_bat_index", "p_ENGINE", "p_TEAM"])
+        pred = pred.merge(team, on=["game_pk", "at_bat_index"], how="left")
+        same = pred["diff"].abs().to_numpy() <= 15
+        res["gate"] = {"rows": int(len(pred)), "rows_compared": int(same.sum()), "rows_abs_diff_over_15": int((~same).sum()),
+                       "maxabs_engine_vs_published": float(np.abs(pred.wp_engine - pred.p_ENGINE)[same].max())}
+        if (len(pred) != 184327 or pred.p_TEAM.isna().any() or not np.isfinite(pred.p_TEAM).all()
+                or not res["gate"]["maxabs_engine_vs_published"] < 1e-9):
+            sys.exit(f"gate failed: {res['gate']}")
     pa = R.load_pa(a.states, [target])
     k = ["game_pk", "inning", "half"]
     tot = pa.groupby(k).runs_on_play.transform("sum")
     pa["rest_runs"] = tot - (pa.groupby(k).runs_on_play.cumsum() - pa.runs_on_play)
+    last = pa.groupby(k).tail(1)
+    cut = last[(last.outs_after < 3) & ~((last.half == "bottom") & (last.inning >= last.scheduled_innings))]
+    cut_keys = set(zip(cut.game_pk, cut.inning, cut.half))       # halves ended early (called / suspended)
     df = pred.merge(pa[["game_pk", "at_bat_index", "home_won", "rest_runs"]], on=["game_pk", "at_bat_index"], how="left")
-    res = {"target": target, "n_rows": int(len(df)), "n_games": int(df.game_pk.nunique())}
+    res.update({"n_rows": int(len(df)), "n_games": int(df.game_pk.nunique())})
     arms = {"PLAYER": df.wp_player.to_numpy(), "ENGINE": df.wp_engine.to_numpy()}
     if not a.dry:
-        team = pd.read_parquet(TEAM_FILE, columns=["game_pk", "at_bat_index", "p_ENGINE", "p_TEAM"])
-        df = df.merge(team, on=["game_pk", "at_bat_index"], how="left")
-        res["gate_engine_vs_published_maxabs"] = float(np.abs(df.wp_engine - df.p_ENGINE).max())
-        if not res["gate_engine_vs_published_maxabs"] < 1e-9 or df.p_TEAM.isna().any() or len(df) != 184327:
-            sys.exit(f"gate failed: {res}")
-        arms = {"PLAYER": df.wp_player.to_numpy(), "ENGINE": df.wp_engine.to_numpy(), "TEAM": df.p_TEAM.to_numpy()}
+        arms["TEAM"] = df.p_TEAM.to_numpy()
     y = df.home_won.to_numpy(float)
     g = df.game_pk.to_numpy()
-    se = {k: (np.clip(v, 1e-4, 1 - 1e-4) - y) ** 2 for k, v in arms.items()}
+    se = {kk: (v - y) ** 2 for kk, v in arms.items()}                 # Brier on the unclipped probabilities
     res["arms"] = {}
     for kk, v in arms.items():
-        p = np.clip(v, 1e-4, 1 - 1e-4)
-        band = (p >= 0.3) & (p < 0.5)
+        p = np.clip(v, 1e-4, 1 - 1e-4)                                # clipped for log loss only
+        band = (v >= 0.3) & (v < 0.5)
         res["arms"][kk] = {"brier": float(se[kk].mean()), "log_loss": float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean()),
-                           "band_0.3_0.5_gap_pt": float(100 * (p[band].mean() - y[band].mean())), "band_n": int(band.sum()),
-                           "calibration": calib(p, y)}
-    # H3 rows: the half can be played out
+                           "band_0.3_0.5_gap_pt": float(100 * (v[band].mean() - y[band].mean())), "band_n": int(band.sum()),
+                           "calibration": calib(v, y)}
+    # H3 rows: the half can be played out, and it was not ended early
     ok = ~((df.half == "bottom") & (df.inning >= df.scheduled_innings)).to_numpy()
+    ok &= np.array([(gg, ii, hh) not in cut_keys for gg, ii, hh in zip(df.game_pk, df.inning, df.half)])
     y1 = (df.rest_runs.to_numpy()[ok] >= 1).astype(float)
     ll = lambda p: -(y1 * np.log(np.clip(p, 1e-6, 1 - 1e-6)) + (1 - y1) * np.log(np.clip(1 - p, 1e-6, 1 - 1e-6)))
     l_pl, l_en = ll(df.p1_player.to_numpy()[ok]), ll(df.p1_engine.to_numpy()[ok])
-    res["runs"] = {"n": int(ok.sum()), "observed_p1": float(y1.mean()), "PLAYER_logloss": float(l_pl.mean()),
-                   "ENGINE_logloss": float(l_en.mean())}
+    res["runs"] = {"n": int(ok.sum()), "halves_ended_early": len(cut_keys), "observed_p1": float(y1.mean()),
+                   "PLAYER_logloss": float(l_pl.mean()), "ENGINE_logloss": float(l_en.mean())}
     rng = np.random.default_rng(SEED)
     diffs = {"H1_PLAYER_minus_ENGINE_brier": se["PLAYER"] - se["ENGINE"]}
     if not a.dry:
@@ -225,7 +259,7 @@ def score(a) -> None:
         prev = max(prev, min(1.0, (len(order) - i) * pv[h]))
         holm[h] = prev
     res["holm_adjusted_p"] = holm
-    res["supported"] = {h: bool(v < 0.05) for h, v in holm.items()}
+    res["supported"] = {h: bool(v <= 0.05) for h, v in holm.items()}
     # reported only
     stage = pd.cut(df.inning, [0, 3, 6, 100], labels=["1-3", "4-6", "7+"])
     res["brier_by_stage"] = {str(s): {kk: float(se[kk][(stage == s).to_numpy()].mean()) for kk in arms} for s in stage.cat.categories}
@@ -239,14 +273,14 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=["predict", "score"])
     ap.add_argument("--states", type=Path, required=True)
-    ap.add_argument("--hf", type=Path)
+    ap.add_argument("--hf", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
-    ap.add_argument("--part", default="0/1")
+    ap.add_argument("--part", help="K/4, required for predict")
     ap.add_argument("--dry", action="store_true")
     a = ap.parse_args()
     if a.mode == "predict":
-        if a.hf is None:
-            sys.exit("--hf is required for predict")
+        if a.hf is None or a.part is None or not a.part.endswith("/4"):
+            sys.exit("predict needs --hf and --part K/4")
         predict(a)
     else:
         score(a)

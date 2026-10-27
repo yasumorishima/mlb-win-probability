@@ -1,8 +1,8 @@
 # Pre-registration: does the player layer predict 2026 better than the engine and the team layer?
 
-Status: DRAFT (FROZEN in the commit that changes this line; nothing below
-changes after that commit except in a dated AMENDMENTS section written
-before the score step is run).
+Status: FROZEN (2026-10-28, cloud). Nothing below changes after the commit
+that set this line, except in a dated AMENDMENTS section written before the
+score step is run. The data md5s are in `test_2026.py` (`INPUT_MD5`).
 
 ## Why
 The engine treats every player as league average. The player layer
@@ -53,11 +53,22 @@ app.
   and `game.STARTER_LAST` (= 6), park strength 0.5.
 - Rows: every 2026 regular-season plate appearance of the tables (184,327,
   the rows of `pred_2026.parquet`).
+- Information the model has slightly early (as in the sizing; disclosed):
+  the lineup card is read as the first batter seen in each slot, so a
+  starter replaced before his first plate appearance is not seen; before a
+  team has fielded, its pitcher is its actual first pitcher (the announced
+  starter); a row's pitcher is the one at the end of the plate appearance,
+  so after a mid-plate-appearance pitching change PLAYER sees the new
+  pitcher from the first pitch (ENGINE and TEAM do not use pitchers).
 
 ## Arms
 - PLAYER: the whole-game player layer v1.
-- ENGINE: the engine as it is (recomputed by the script; must equal
-  `p_ENGINE` of `pred_2026.parquet` to 1e-9 or the run stops).
+- ENGINE: the engine as it is (recomputed by the script). Gate before any
+  outcome is loaded: on rows with |score difference| ≤ 15 it must equal
+  `p_ENGINE` of `pred_2026.parquet` to 1e-9 (that file clips the score
+  difference at ±15, the engine at ±30; the number of rows outside is
+  reported); all 184,327 rows present, no missing or non-finite
+  prediction, else the run stops.
 - TEAM: `p_TEAM` of `pred_2026.parquet` (the frozen team layer).
 
 ## Hypotheses (one-sided, alpha 0.05, Holm over the three)
@@ -65,10 +76,16 @@ app.
 - H2: Brier(PLAYER) < Brier(TEAM) for home win.
 - H3: log loss of P(≥1 more run in the rest of this half-inning),
   PLAYER < ENGINE, on the rows whose half can be played out (not the
-  bottom of the last scheduled inning or later).
+  bottom of the last scheduled inning or later) and was not ended early
+  (a half whose last play left fewer than three outs: called or
+  suspended games; the count is reported).
+Brier is computed on the unclipped probabilities (as in the team-layer
+study); log loss clips to [1e-4, 1 − 1e-4] (WP) and [1e-6, 1 − 1e-6]
+(P(≥1 run)).
 Bootstrap over games (2,000 resamples, seed 20261028; a game's rows move
 together; arms resampled together); one-sided p = (1 + #{resampled
-difference ≥ 0}) / 2001. A hypothesis is SUPPORTED only if Holm passes it.
+difference ≥ 0}) / 2001. A hypothesis is SUPPORTED only if its
+Holm-adjusted p is ≤ 0.05.
 95% percentile intervals for every difference. Resolution: on one season
 the sizing intervals suggest a 95% half-width near 0.0015 for H1, so an
 effect like 2025's (−0.0011) may not be detected; a NOT SUPPORTED result
@@ -87,6 +104,14 @@ by stage the PLAYER Brier is lower in innings 1-3 and 4-6 and slightly
 higher in 7+ (0.09002 vs 0.08985). The H1 interval half-width on one
 season is therefore about 0.0015.
 
+## Run
+`test_2026.py predict --part K/4` (K = 0..3, no outcome read), then
+`test_2026.py score` once. The score step checks that this file says
+FROZEN and that every file listed below has its md5, and records the
+md5s and package versions. Outputs: `published/pred_2026_part*.parquet`
+(predictions) and `published/results_2026.json`, committed with
+`RESULTS_2026.md`. Results are published whatever they are.
+
 ## What follows
 - H1 supported → the player layer becomes the base of the bench screen's
   numbers (with the disclosure that 2026 had been used before); the app
@@ -99,7 +124,16 @@ season is therefore about 0.0015.
   season (rule to be registered before opening day).
 
 ## Frozen files (md5)
-(filled in the freezing commit)
+f4022c129cf8db455f54f942a3aa0e40  research/player_layer/test_2026.py
+24cd633fdb951a6a5a195cf7f17ec149  research/player_layer/layer.py
+6883dd4c9f13b64f0073e06923595312  research/player_layer/game.py
+6ec9535345c1098f069babaf15160269  research/player_layer/pa_rates.py
+d9a6d77695ed33e4f0bf41ec9d945ccf  research/player_layer/size_game.py
+4681783920315619f4a4b58abffe712d  research/player_layer/size_pa.py
+033bb61b84531f594545611cc45d24a9  research/player_layer/size_context.py
+12972ac8bb23a2dc8c152c07cbfd7a56  wp_engine.py
+ffd4b264f96c29434ba21afb4ac7c9fb  engine_tables.json
+5b47b5bbf86b828f9fa230a54fa2f1fd  research/player_layer/published/dry_2025.json
 
 ## AMENDMENTS
 (none)
