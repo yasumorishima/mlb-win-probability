@@ -214,5 +214,6 @@ def matchups(feed: dict, n_next: int = 3) -> dict | None:
         rows.append({"order": k, "id": pid, "name": nm.get(pid, str(pid)),
                      "p_on_base": float(p[C.index("BB")] + p[C.index("1B")] + p[C.index("2B")] + p[C.index("3B")] + p[C.index("HR")]),
                      "p_k": float(p[C.index("K")]), "p_xbh": float(p[C.index("2B")] + p[C.index("3B")] + p[C.index("HR")]),
-                     "p_hr": float(p[C.index("HR")])})
+                     "p_hr": float(p[C.index("HR")]), "p_bb": float(p[C.index("BB")]), "p_1b": float(p[C.index("1B")]),
+                     "p_2b": float(p[C.index("2B")]), "p_3b": float(p[C.index("3B")]), "p_out": float(p[C.index("OUT")])})
     return {"pitcher": nm.get(m.pitcher, str(m.pitcher)), "rows": rows, "p_other": float(po)}
