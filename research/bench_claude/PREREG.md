@@ -20,15 +20,20 @@ MLB managers actually do; it does not mean they are better.
   Pilot: 4 games of 2026-06-01..06-30 (seed + 1), never scored.
 - Items: every pitching change from the 6th inning on (excluding the starting pitcher's entry), and
   every pinch hitter (substitution marked PH / "Pinch-hitter"), in those games. The moment is the
-  state just before that plate appearance, rebuilt from the game feed with no hindsight
-  (`bench_replay.moment_at`: lineups and bench through earlier substitutions, pitchers already used,
-  player records = MLB totals 2021-2025, bullpen usage over the 30 days before the game date).
-- Candidates: the relievers not yet used that the bench screen lists (role: mostly relief work in
-  2024-2025, unknown kept), or the bench players not yet used. Listed in id order.
+  one the call was made at, rebuilt from the game feed with no hindsight (`bench_replay.moment_at`
+  with `upto_event`: lineups and bench through earlier substitutions, including those earlier in the
+  same plate appearance — e.g. a pinch hitter sent up after a pitching change faces the new pitcher —,
+  pitchers already used, player records = MLB totals 2021-2025, bullpen usage over the 30 days
+  before the game date; game 1 of a doubleheader is not visible in game 2's usage / rest, for every arm).
+- Candidates: the relievers not yet used that the bench screen lists (pitchers by primary position
+  P / two-way; role: mostly relief work in 2024-2025, unknown kept), or the bench players not yet
+  used (non-pitchers). Listed in id order. A position player who pitched in a blowout is therefore
+  not a candidate, and such an item is excluded (label not among the candidates).
 - Label: the player the manager sent in. Items whose label is not among the candidates (e.g. a
   starter used in relief) or with fewer than 2 candidates are excluded; their count is reported.
-- What was read before freezing: the number of items and exclusions per task (needed to plan cost).
-  No agreement rate of any arm was computed.
+- Counts (read before freezing, needed to plan cost): 620 items in 80 games; 33 excluded
+  (30 label not among the candidates, 3 fewer than 2 candidates); 422 pitching changes and
+  165 pinch hitters scored. No agreement rate of any arm on these items was computed.
 
 ## Arms
 - **C** — Claude (`claude-opus-5-5`, effort `medium`, structured output `{choice, top3, reason}`)
@@ -36,10 +41,11 @@ MLB managers actually do; it does not mean they are better.
   model's value of every candidate (WP change for the deciding team vs no change, and its rank).
 - **B** — the same without the model's numbers.
 - **MODEL** — the candidate with the highest model value (`bench.py`, player layer with the
-  late-inning usage bullpen, as in the app).
+  late-inning usage bullpen, as in the app; values rounded to 1e-4 points, ties: lowest id).
 - **USAGE** — pitching changes only: the available candidate with the largest usage weight for that
-  inning and lead state (`pen_usage.weights`, variant B; the 6th inning uses innings 7-9 together;
-  none = miss).
+  inning and the fielding team's lead when the half began (`pen_usage.weights`, variant B, the usage
+  tables' definition; the 6th inning and extra innings use innings 7-9 together; ties: lowest id;
+  no candidate with usage = miss).
 - Same system prompt for B and C (`run_claude.py`). One answer per item and arm; no repeats.
   No server-side refusal fallback (the Batches API rejects it).
 
@@ -69,11 +75,25 @@ MLB managers actually do; it does not mean they are better.
   game date (usage), not on these labels.
 
 ## Cost cap
-- Pilot: the 24 non-excluded pilot items x arms B and C, live calls (about 48 calls).
-- The main run is two Batches (B, C) over the test items. Stop and report if the pilot's mean cost
-  per call x the number of test calls exceeds **$40** (owner approved $60 for Claude studies).
-- A request that errors in the batch is resubmitted once in a retry batch; still failing = miss.
+- Pilot: the 23 non-excluded pilot items x arms B and C, live calls (46 calls, full price).
+- The main run is two Batches (B, C) over the 587 test items (1,174 calls). Cap: the pilot's mean
+  tokens per call priced at the Batches rate (half of $4 in / $20 out per MTok) x 1,174 must not
+  exceed **$40**; otherwise stop and report (owner approved $60 for Claude studies).
+  `run_claude.py pilot_cost` computes it.
+- A request that errors in the batch is resubmitted once in a retry batch (`submit --retry`,
+  `collect --retry`, appended; the last record per item counts); still failing = miss.
 - Calls, tokens and cost are recorded in the results.
+
+## Review before the freeze
+An independent review (subagent, read-only, no API call, no agreement computed) found two blocking
+problems in the draft, both fixed before this freeze and verified on the pilot items:
+(1) a position player who pitched later in the game was a reliever candidate (and could be the
+label) because the end-of-game boxscore position was used — fixed with the primary position;
+(2) a call made after another substitution in the same plate appearance was built on the moment
+before that substitution — fixed with `upto_event`. Smaller points also fixed: a retry path for
+errored batch requests, the cost-cap pricing, the USAGE lead state (half start, as the tables),
+ties, a resumable pilot. Tests in `tests/test_bench_replay.py` catch both blocking defects
+(planted and caught).
 
 ## Outputs
 `published/results.json` (analyze.py), `published/raw/` (all answers, gzipped), `RESULTS.md`

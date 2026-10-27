@@ -163,3 +163,34 @@ def test_review_screen():
     r = subprocess.run([sys.executable, "-c", code], env=env, cwd=ROOT, capture_output=True, text=True, timeout=600)
     assert r.returncode == 0, (r.stdout[-3000:], r.stderr[-3000:])
     assert "OK" in r.stdout
+
+
+def test_position_player_who_pitched_later_is_not_a_reliever():
+    import copy
+    feed = copy.deepcopy(FEED)
+    x = F.AWAY_BENCH[0]
+    feed["liveData"]["boxscore"]["teams"]["away"]["players"][f"ID{x}"]["position"] = {"abbreviation": "P"}   # end-of-game position
+    feed["gameData"]["players"][f"ID{x}"]["primaryPosition"] = {"abbreviation": "RF"}
+    _, _, ex = R.moment_at(feed, K_PC)                  # bottom half: the away team fields
+    assert x not in ex["bullpen"]
+    k_top = next(t["k"] for t in TL if t["top_bottom"] == "top")
+    _, _, ex2 = R.moment_at(feed, k_top)                # top half: the away team bats, he is on its bench
+    assert x in ex2["bench"]
+
+
+def test_call_after_an_earlier_substitution_in_the_same_plate_appearance():
+    import copy
+    feed = copy.deepcopy(FEED)
+    plays = [p for p in feed["liveData"]["plays"]["allPlays"] if p["about"]["isComplete"]]
+    p = plays[K_PC]                                     # the away team changes pitchers here (event 0)
+    p["playEvents"].append({"details": {"eventType": "offensive_substitution", "description": "Pinch-hitter X"},
+                            "player": {"id": F.HOME_BENCH[1]}, "battingOrder": "301", "position": {"abbreviation": "PH"}})
+    tl = R.timeline(feed)
+    ph = next(d for d in tl[K_PC]["decisions"] if d["type"] == "pinch")
+    m0, _, _ = R.moment_at(feed, K_PC)
+    m1, _, ex1 = R.moment_at(feed, K_PC, upto_event=ph["idx"])
+    assert m0.pitcher == F.SP[1] and m1.pitcher == F.RP[2]          # the pinch hitter faces the new pitcher
+    assert not m1.cur_is_starter
+    pc = next(d for d in tl[K_PC]["decisions"] if d["type"] == "pitch_change")
+    m2, _, _ = R.moment_at(feed, K_PC, upto_event=pc["idx"])
+    assert m2.pitcher == F.SP[1]                                     # the change itself: decided before it happened

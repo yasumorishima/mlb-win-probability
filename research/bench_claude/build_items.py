@@ -11,7 +11,11 @@ For each item, built only from what was known before the play (bench_replay):
   actual       : who the manager sent in (the label; not shown to Claude)
   model_pick   : the player layer's best candidate (bench.py with the late-inning usage bullpen)
   usage_pick   : pitching change only: the available reliever the team used most in that inning and
-                 lead state over the previous 30 days (pen_usage.py weights; inning 6 uses innings 7-9)
+                 lead state (the fielding team's lead when the half began) over the previous 30 days
+                 (pen_usage.py weights; innings 6 and 10+ use innings 7-9 together)
+The moment is the one the call was made at: substitutions earlier in the same plate appearance
+are applied (bench_replay.moment_at upto_event). Reliever candidates are pitchers by primary
+position (P / two-way), so a position player who pitched in a blowout is not a candidate.
   payload_B    : what Claude sees without the model's numbers
   payload_C    : the same plus the model's value of every candidate
 Items whose actual player is not among the candidates are kept with excluded=reason.
@@ -99,7 +103,8 @@ def build(feeds: Path, pks: list[int]) -> list[dict]:
                     task = "pinch_hitter"
                 else:
                     continue
-                got = RP.moment_at(fd, t["k"])
+                # the moment the call was made: substitutions earlier in the same plate appearance applied
+                got = RP.moment_at(fd, t["k"], upto_event=dec.get("idx"))
                 if got is None:
                     continue
                 m, data, ex = got
@@ -124,19 +129,23 @@ def build(feeds: Path, pks: list[int]) -> list[dict]:
                     item["excluded"] = "actual_not_in_candidates"
                 if len(cands) < 2:
                     item["excluded"] = item.get("excluded") or "fewer_than_2_candidates"
-                item["model_value"] = {str(p): round(v, 4) for p, v in val.items()}
-                item["model_pick"] = max(val, key=val.get) if val else None
+                val = {p: round(v, 4) for p, v in val.items()}
+                item["model_value"] = {str(p): v for p, v in val.items()}
+                item["model_pick"] = max(sorted(val), key=val.get) if val else None    # ties: lowest id
                 # usage pick (pitching changes): the most-used available reliever in that inning and lead state
                 usage_pick = None
                 if task == "pitching_change":
-                    fld_lead = m.diff if m.half == "top" else -m.diff
+                    # the fielding team's lead when the half began (the usage tables' definition)
+                    first = next(j for j, q in enumerate(tl) if q["inning"] == m.inning and q["top_bottom"] == m.half)
+                    h0, a0 = (tl[first - 1]["home_score"], tl[first - 1]["away_score"]) if first else (0, 0)
+                    fld_lead = (h0 - a0) if m.half == "top" else (a0 - h0)
                     ls = PU.lead_state(int(fld_lead))
                     u = PU.usage(int(teams[side]["id"]), day)
                     av = {p: u[p] for p in cands if p in u}
                     W, _ = PU.weights(av, list(av), "B")
                     ii = 3 if (m.inning >= 10 or m.inning == 6) else m.inning - 7
                     w = W.get((ii, ls), {})
-                    usage_pick = max(w, key=w.get) if w else None
+                    usage_pick = max(sorted(w), key=w.get) if w else None            # ties: lowest id
                 item["usage_pick"] = usage_pick
                 # what Claude sees
                 fld_team = teams["home" if m.half == "top" else "away"]["name"]
