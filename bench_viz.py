@@ -213,3 +213,47 @@ def steal_badge(opt: dict, lang: str) -> str:
             f'background:#1f1f3a;border:2px solid {color}">'
             f'<span style="color:{color};font-weight:bold;font-size:1.25rem">{icon} {what}：{word}</span>'
             f'<span style="color:#c3c2b7;margin-left:12px">{nums}</span></div>')
+
+
+def fig_calls(rows: list[dict], home: str, away: str, lang: str) -> go.Figure:
+    """Each rated call of a game: the model's gain for the team that made it
+    (filled dot, team color) and the best candidate of the same kind (hollow
+    ring), joined by a line = how far the call was from the model's best.
+    rows: dicts with label, side ('home'/'away'), gain, best_gain (or None)."""
+    ja = lang == "JA"
+    rows = rows[::-1]                                   # first call at the top
+    y = list(range(len(rows)))
+    fig = go.Figure()
+    for r, yy in zip(rows, y):
+        if r.get("best_gain") is not None and abs(r["best_gain"] - r["gain"]) > 1e-9:
+            fig.add_trace(go.Scatter(x=[r["gain"], r["best_gain"]], y=[yy, yy], mode="lines",
+                                     line=dict(color=MUTED, width=2), hoverinfo="skip", showlegend=False))
+    best = [(r["best_gain"], yy, r.get("best_label", "")) for r, yy in zip(rows, y) if r.get("best_gain") is not None]
+    if best:
+        fig.add_trace(go.Scatter(x=[b[0] for b in best], y=[b[1] for b in best], mode="markers",
+                                 name="モデルの最善候補" if ja else "model's best candidate",
+                                 marker=dict(size=12, color=SURFACE, line=dict(color=INK2, width=2)),
+                                 customdata=[b[2] for b in best],
+                                 hovertemplate="%{customdata}: %{x:+.2f} pt<extra></extra>"))
+    for side, name, color in (("away", away, AWAY), ("home", home, HOME)):
+        pts = [(r, yy) for r, yy in zip(rows, y) if r["side"] == side]
+        if not pts:
+            continue
+        fig.add_trace(go.Scatter(x=[r["gain"] for r, _ in pts], y=[yy for _, yy in pts], mode="markers", name=name,
+                                 marker=dict(size=13, color=color, line=dict(color=SURFACE, width=2)),
+                                 customdata=[r["label"] for r, _ in pts],
+                                 hovertemplate="%{customdata}: %{x:+.2f} pt<extra></extra>"))
+    vals = [r["gain"] for r in rows] + [r["best_gain"] for r in rows if r.get("best_gain") is not None]
+    span = max([abs(v) for v in vals] + [0.5]) * 1.25
+    lay = _base_layout(max(180, 30 * len(rows) + 110))
+    lay["margin"] = dict(l=48, r=16, t=64, b=36)
+    key = ("<span style='font-size:11px;color:#c3c2b7'>点＝実際の采配　白丸＝同じ種類で最善の候補　右ほど采配したチームに有利（勝率、ポイント）</span>" if ja else
+           "<span style='font-size:11px;color:#c3c2b7'>dot = the call made, ring = best candidate of the same kind; right = better for the team that made it (WP points)</span>")
+    lay.update(title=dict(text=("モデルから見た各采配" if ja else "Each call, as the model saw it") + f"<br>{key}",
+                          font=dict(color=INK, size=14), x=0, xanchor="left"),
+               xaxis=dict(range=[-span, span], gridcolor=GRID, zeroline=True, zerolinecolor=MUTED, zerolinewidth=1, ticksuffix=" pt"),
+               yaxis=dict(tickvals=y, ticktext=[r["label"] for r in rows], automargin=True, tickfont=dict(color=INK, size=12),
+                          showgrid=False),
+               legend=dict(orientation="h", y=-0.12, x=0, font=dict(color=INK2)))
+    fig.update_layout(**lay)
+    return fig

@@ -53,6 +53,57 @@ def test_runner_and_options_at_a_steal_moment():
     assert any(o["kind"] == "steal" for o in out["offense"])
 
 
+def test_rating_of_each_call():
+    import bench_viz as V
+    series = V.wp_series(FEED)
+    rows = R.game_review(FEED, series)
+    by = {r["type"]: r for r in rows}
+    assert {"pinch", "pitch_change", "steal"} <= set(by)
+    assert by["pinch"]["side"] == "home" and by["pitch_change"]["side"] == "away" and by["steal"]["side"] == "home"
+    # pinch hitter: the PH option at that moment, ranked among pinch hitters only
+    k = by["pinch"]["k"]
+    opts = BL.bench_options(FEED, got=R.moment_at(FEED, k))
+    ph = sorted([o for o in opts["all"] if o["kind"] == "pinch_hit"], key=lambda o: -o["wp_offense"])
+    me = next(o for o in ph if o["option"] == f"pinch_hit:{F.PH}")
+    rt = by["pinch"]["rating"]
+    assert rt["me"]["kind"] == "pinch_hit" and rt["n"] == len(ph) and rt["rank"] == ph.index(me) + 1
+    assert abs(rt["gain"] - 100 * me["delta_wp_offense"]) < 1e-9
+    # pitching change: rated from the fielding team's side (sign flipped)
+    k2 = by["pitch_change"]["k"]
+    opts2 = BL.bench_options(FEED, got=R.moment_at(FEED, k2))
+    pc = next(o for o in opts2["all"] if o["option"] == f"pitch_change:{F.RP[2]}")
+    assert abs(by["pitch_change"]["rating"]["gain"] + 100 * pc["delta_wp_offense"]) < 1e-9
+    best = min((o for o in opts2["all"] if o["kind"] == "pitch_change"), key=lambda o: o["wp_offense"])
+    assert by["pitch_change"]["rating"]["best"]["option"] == best["option"]
+    # swing over the play, for the team that made the call
+    assert abs(by["pinch"]["swing"] - 100 * (series[k + 1]["wp"] - series[k]["wp"])) < 1e-9
+    assert abs(by["pitch_change"]["swing"] - 100 * (series[k2]["wp"] - series[k2 + 1]["wp"])) < 1e-9
+
+
+def test_pinch_runner_is_rated_as_a_pinch_runner():
+    ph = {"kind": "pinch_hit", "option": "pinch_hit:5", "wp_offense": 0.6, "delta_wp_offense": 0.1}
+    pr = [{"kind": "pinch_run", "option": "pinch_run:5", "wp_offense": 0.52, "delta_wp_offense": 0.02},
+          {"kind": "pinch_run", "option": "pinch_run:6", "wp_offense": 0.51, "delta_wp_offense": 0.01}]
+    opts = {"all": [ph] + pr}
+    r = R.rate({"type": "pinch", "player": 5, "pos": "PR", "text": "Pinch-runner X replaces Y"}, opts)
+    assert r["me"]["option"] == "pinch_run:5" and r["n"] == 2 and r["rank"] == 1
+    r = R.rate({"type": "pinch", "player": 5, "pos": "PH", "text": "Pinch-hitter X replaces Y"}, {"all": pr + [ph]})
+    assert r["me"]["option"] == "pinch_hit:5" and r["n"] == 1
+    assert R.rate({"type": "pinch", "player": 9, "pos": "PH", "text": ""}, opts) is None
+
+
+def test_missed_chances_skip_calls_that_were_made():
+    rows = R.missed_chances(FEED, min_gain=-1e9, top=10_000)
+    tl = {t["k"]: t for t in TL}
+    assert len(rows) == len(TL)                         # with no threshold every moment has a best move
+    for r in rows:
+        t = tl[r["k"]]
+        made = {(R.deciding_side(t, d), d["type"]) for d in t["decisions"]}
+        assert (r["side"], R.MISSED_KINDS[r["option"]["kind"]]) not in made
+        assert r["option"]["kind"] != "pitch_change"     # the fixture has 4 innings: no changes before the 7th
+    assert all(r["gain"] >= 1.0 for r in R.missed_chances(FEED))
+
+
 CHILD = r"""
 import sys
 sys.path.insert(0, ROOT); sys.path.insert(0, ROOT + "/tests")
@@ -88,6 +139,18 @@ assert not at.exception, at.exception
 assert at.session_state["review_k"] == kph + 1
 at.button(key="review_hot").click().run()
 assert not at.exception, at.exception
+# the game summary
+at.radio(key="review_view_JA").set_value("📝 試合のまとめ").run()
+assert not at.exception, at.exception
+md = " ".join(m.value for m in at.markdown)
+assert "Home：采配" in md and "Away：采配" in md, md[-800:]
+df = at.dataframe[0].value
+assert len(df) == len([d for t in tl for d in t["decisions"] if d["type"] != "defense"]), df
+assert any("代打" in str(v) or "代走" in str(v) for v in df[df.columns[2]])
+at.button(key="review_miss_777").click().run()
+assert not at.exception, at.exception
+md = " ".join(m.value for m in at.markdown)
+assert "モデルが 1 ポイント以上" in md
 print("OK")
 """
 

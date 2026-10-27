@@ -152,3 +152,125 @@ def moment_at(feed: dict, k: int, snapshot_path: str | None = "auto"):
                       runner_ids=runner_ids)
     got[2]["season"] = season
     return got
+
+
+# --- rating the manager's calls --------------------------------------------
+
+OFFENSE_DECISIONS = {"pinch", "steal", "bunt"}
+KINDS = {"pinch": ("pinch_hit", "pinch_run"), "pitch_change": ("pitch_change",)}
+
+
+def deciding_side(t: dict, dec: dict) -> str:
+    """'home' / 'away': the team that made the call."""
+    bat = "home" if t["top_bottom"] == "bottom" else "away"
+    return bat if dec["type"] in OFFENSE_DECISIONS else ("away" if bat == "home" else "home")
+
+
+def rate(dec: dict, opts: dict) -> dict | None:
+    """How the model rated a call before the play, from the deciding team's
+    side: gain = its WP with the call minus its WP with no move (points),
+    best = the best candidate of the same kind, rank among those candidates.
+    None if the call is not among the options (e.g. a player without records)."""
+    allo = opts["all"]
+    sign = 1 if dec["type"] in OFFENSE_DECISIONS else -1
+    if dec["type"] == "steal":
+        cands = [o for o in allo if o["kind"] == "steal"]
+        if not cands:
+            return None
+        txt = dec.get("text", "")
+        me = next((o for o in cands if ("3rd" in txt) == (o["option"].startswith("steal_3b"))), cands[0])
+        return {"gain": 100 * me["delta_wp_offense"], "call": "go" if me["go"] else "hold", "me": me,
+                "p_success": me["p_success"], "breakeven": me["breakeven"], "agree": bool(me["go"]),
+                "rank": None, "n": None, "best": None, "best_gain": None}
+    if dec["type"] in ("bunt", "intentional_walk"):
+        me = next((o for o in allo if o["kind"] == dec["type"]), None)
+        if me is None:
+            return None
+        g = sign * 100 * me["delta_wp_offense"]
+        return {"gain": g, "agree": g > 0, "me": me, "rank": None, "n": None, "best": None, "best_gain": None, "call": None}
+    kinds = KINDS.get(dec["type"])
+    if not kinds:
+        return None
+    if dec["type"] == "pinch":
+        txt = (dec.get("text") or "").lower()
+        if dec.get("pos") == "PR" or "pinch-runner" in txt:
+            kinds = ("pinch_run",)
+        elif dec.get("pos") == "PH" or "pinch-hitter" in txt:
+            kinds = ("pinch_hit",)
+    me = next((o for o in allo if o["kind"] in kinds and o["option"].endswith(f":{dec.get('player')}")), None)
+    if me is None:
+        return None
+    # rank among candidates of the same kind (a pinch runner against pinch runners)
+    cands = sorted([o for o in allo if o["kind"] == me["kind"]], key=lambda o: -sign * o["wp_offense"])
+    best = cands[0]
+    return {"gain": sign * 100 * me["delta_wp_offense"], "rank": cands.index(me) + 1, "n": len(cands),
+            "best": best, "best_gain": sign * 100 * best["delta_wp_offense"], "agree": cands.index(me) == 0, "me": me,
+            "call": None}
+
+
+def game_review(feed: dict, series: list[dict] | None = None, snapshot_path: str | None = "auto") -> list[dict]:
+    """Every call of the game (substitutions in the field excluded) with the
+    model's rating before the play and the WP swing over the play.
+    `series`: bench_viz.wp_series(feed) (home WP before play i at index i)."""
+    tl = timeline(feed)
+    rows = []
+    for t in tl:
+        decs = [d for d in t["decisions"] if d["type"] != "defense"]
+        if not decs:
+            continue
+        got = moment_at(feed, t["k"], snapshot_path)
+        opts = BL.bench_options(feed, got=got) if got is not None else None
+        for d in decs:
+            side = deciding_side(t, d)
+            r = rate(d, opts) if opts else None
+            sw = None
+            if series and t["k"] + 1 < len(series):
+                a, b = series[t["k"]]["wp"], series[t["k"] + 1]["wp"]
+                sw = 100 * ((b - a) if side == "home" else (a - b))
+            rows.append({"k": t["k"], "inning": t["inning"], "top_bottom": t["top_bottom"], "outs": t["outs"],
+                         "runners": t["runners"], "side": side, "type": d["type"], "text": d.get("text", ""),
+                         "rating": r, "swing": sw, "event": t["event"]})
+    return rows
+
+
+MISSED_KINDS = {"pinch_hit": "pinch", "pinch_run": "pinch", "bunt": "bunt", "steal": "steal",
+                "intentional_walk": "intentional_walk", "pitch_change": "pitch_change"}
+
+
+def missed_chances(feed: dict, min_gain: float = 1.0, top: int = 5, pitch_from: int = 7,
+                   snapshot_path: str | None = "auto", progress=None) -> list[dict]:
+    """Moments where the model's best move gained at least `min_gain` WP
+    points for one team and that team made no call of that kind in the play.
+    Pitching changes only from inning `pitch_from` (earlier ones are
+    overstated: the model's bullpen after the change is the pooled average)."""
+    tl = timeline(feed)
+    out = []
+    for i, t in enumerate(tl):
+        if progress:
+            progress(i / max(len(tl), 1))
+        got = moment_at(feed, t["k"], snapshot_path)
+        if got is None:
+            continue
+        opts = BL.bench_options(feed, got=got)
+        made = {(deciding_side(t, d), d["type"]) for d in t["decisions"]}
+        bat = "home" if t["top_bottom"] == "bottom" else "away"
+        fld = "away" if bat == "home" else "home"
+        best = None
+        for o in opts["all"]:
+            kind = o["kind"]
+            if kind not in MISSED_KINDS or (kind == "pitch_change" and t["inning"] < pitch_from):
+                continue
+            if kind == "steal" and not o["go"]:
+                continue
+            side = bat if o["side"] == "offense" else fld
+            g = 100 * o["delta_wp_offense"] * (1 if o["side"] == "offense" else -1)
+            if g < min_gain or (side, MISSED_KINDS[kind]) in made:
+                continue
+            if best is None or g > best["gain"]:
+                best = {"k": t["k"], "inning": t["inning"], "top_bottom": t["top_bottom"], "outs": t["outs"],
+                        "runners": t["runners"], "batter": t["batter"], "side": side, "option": o, "gain": g}
+        if best:
+            out.append(best)
+    if progress:
+        progress(1.0)
+    return sorted(out, key=lambda r: -r["gain"])[:top]
