@@ -78,7 +78,14 @@ is not evidence that players do not matter.
 Log loss, calibration in tenths, the 0.3-0.5 band gap of each arm, Brier
 by game stage (innings 1-3, 4-6, 7+), the run-level log losses. The dry
 run on 2025 (`--dry`, fitted on 2021-2024, no TEAM arm) is reported with
-its numbers as a check of the pipeline, not as evidence.
+its numbers as a check of the pipeline, not as evidence. It was run before
+freezing (2026-10-28, cloud; `published/dry_2025.json`): Brier PLAYER
+0.154562 vs ENGINE 0.155666, difference −0.00110 (95% −0.00260 to
++0.00042; equal to the sizing's 2025 value, so the test code reproduces
+the sizing code), P(≥1 run) log loss −0.00230 (−0.00285 to −0.00175);
+by stage the PLAYER Brier is lower in innings 1-3 and 4-6 and slightly
+higher in 7+ (0.09002 vs 0.08985). The H1 interval half-width on one
+season is therefore about 0.0015.
 
 ## What follows
 - H1 supported → the player layer becomes the base of the bench screen's
