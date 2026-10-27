@@ -78,6 +78,7 @@ class Data:
     split_bat: dict = field(default_factory=dict)   # (id, pitcher hand) -> counts (7)
     split_pit: dict = field(default_factory=dict)   # (id, batter side) -> counts (7)
     platoon: dict = field(default_factory=dict)     # "LvR" etc -> league factor (7)
+    prm: dict | None = None                         # shrinkage (layer.PARAMS when None)
 
 
 def _counts(d: dict, k) -> np.ndarray:
@@ -108,7 +109,8 @@ def _platoon(data: Data, ids, pid) -> np.ndarray:
 
 
 def _mult(data: Data, ids, pid, pcounts, dfn, park) -> np.ndarray:
-    m = Ly.multipliers(np.vstack([_counts(data.bat, b) for b in ids]), pcounts[None, :], dfn[None, :], data.L, park=park)
+    m = Ly.multipliers(np.vstack([_counts(data.bat, b) for b in ids]), pcounts[None, :], dfn[None, :], data.L,
+                       prm=data.prm or Ly.PARAMS, park=park)
     return m * _platoon(data, ids, pid)
 
 

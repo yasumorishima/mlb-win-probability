@@ -43,7 +43,9 @@ LABEL_JA = {"none": "そのまま", "bunt": "送りバント", "intentional_walk
 def _snapshot() -> dict:
     s = json.loads(SNAPSHOT.read_text())
     arr = lambda d: {int(k): np.asarray(v, float) for k, v in d.items()}
-    s["_bat"], s["_pit"] = arr(s["bat"]), arr(s["pit"])
+    s["_bat_all"], s["_pit_all"] = arr(s["bat"]), arr(s["pit"])
+    # season-decayed records (size_decay.py); the bullpen pool and roles use them too
+    s["_bat"], s["_pit"] = arr(s.get("bat_decay", s["bat"])), arr(s.get("pit_decay", s["pit"]))
     s["_bat_vs"] = {(int(k.split("|")[0]), k.split("|")[1]): np.asarray(v, float) for k, v in s["bat_vs"].items()}
     s["_pit_vs"] = {(int(k.split("|")[0]), k.split("|")[1]): np.asarray(v, float) for k, v in s["pit_vs"].items()}
     s["_ct"] = {h: {"P": np.asarray(v["P"]), "T": np.asarray(v["T"])} for h, v in s["class_tables"].items()}
@@ -130,7 +132,12 @@ def moment_from_feed(feed: dict) -> tuple[B.Moment, B.Data, dict] | None:
                  bat_pitcher=int(bp), cur_is_starter=len(fld_pitchers) <= 1,
                  bat_pitcher_is_starter=len(bat_pitchers) <= 1,
                  park=np.asarray(park) if park else None, extra_runner=bool(st.get("extra_runner", True)))
-    data = B.Data(L=L, bat=s["_bat"], pit=s["_pit"], pen_fld=pool(_ids(fld_box.get("bullpen"))),
+    dec = s.get("decay")
+    prm = None
+    if dec and "bat_decay" in s:
+        import layer as Ly
+        prm = {k: (v * dec["k_scale"] if k != "kd" else v) for k, v in Ly.PARAMS.items()}
+    data = B.Data(L=L, bat=s["_bat"], pit=s["_pit"], prm=prm, pen_fld=pool(_ids(fld_box.get("bullpen"))),
                   pen_bat=pool(_ids(bat_box.get("bullpen"))),
                   def_fld=np.asarray(s["dfn"].get(str(fld_team), [0, 0, 0, 0]), float),
                   def_bat=np.asarray(s["dfn"].get(str(bat_team), [0, 0, 0, 0]), float),

@@ -84,10 +84,18 @@ def main() -> None:
     # role: starts and relief appearances in 2025-2026 (relievers only are offered as pitching changes)
     app = pa[pa.season >= 2025].groupby(["game_pk", "fld_team", "pitcher"], sort=False).cur_is_starter.first().reset_index()
     role = app.groupby("pitcher").cur_is_starter.agg(["sum", "size"])
+    # season decay (size_decay.py: earlier seasons x 0.6 each, shrinkage x 0.7), as seen from the
+    # season after the last one in the tables: the latest season weighs 0.6, the one before 0.36, ...
+    last = int(done.season.max())
+    wgt = done.season.map(lambda x: 0.6 ** (last + 1 - x))
+    def wcounts(key):
+        t = pd.crosstab(done[key], done.cls, values=wgt, aggfunc="sum").reindex(columns=C).fillna(0.0)
+        return {str(k): [round(float(x), 3) for x in v] for k, v in zip(t.index, t.to_numpy())}
     snap = {
         "classes": C, "bip": R.BIP, "records_through": str(done.date.max().date()),
         "bat": {str(k): v.tolist() for k, v in zip(counts(done, ["batter"]).index, counts(done, ["batter"]).to_numpy())},
         "pit": {str(k): v.tolist() for k, v in zip(counts(done, ["pitcher"]).index, counts(done, ["pitcher"]).to_numpy())},
+        "bat_decay": wcounts("batter"), "pit_decay": wcounts("pitcher"), "decay": {"lam": 0.6, "k_scale": 0.7},
         "bat_vs": {f"{b}|{h}": v.tolist() for (b, h), v in zip(counts(done, ["batter", "phand"]).index, counts(done, ["batter", "phand"]).to_numpy())},
         "pit_vs": {f"{p}|{h}": v.tolist() for (p, h), v in zip(counts(done, ["pitcher", "bside"]).index, counts(done, ["pitcher", "bside"]).to_numpy())},
         "pen": {str(k): v.tolist() for k, v in zip(pen.index, pen.to_numpy())},
