@@ -713,12 +713,12 @@ with st.container():
                 st.caption(
                     (f"打者・投手・球場・左右から打席の結果を出し、実際の打順とブルペンで残りの試合を計算した値です"
                      f"（事前登録して 2026 年で確認。2026 年は以前の確認にも使っています）。選手の成績は "
-                     f"{out['records_through']} までで、今季の分は入っていません。代走・守備固め・この回より先の継投は"
-                     f"考えていません。") if ja else
+                     f"{out['records_through']} までで、今季の分は入っていません。守備固めは考えていません。7 回以降の救援は、"
+                     f"2022〜2026 年の試合ならそのチームの直近 30 日の起用、それ以外はブルペン全体の平均です。") if ja else
                     (f"Plate-appearance outcomes from batter, pitcher, park and handedness, played out with the real "
                      f"lineups and bullpen (pre-registered and confirmed on 2026, a season used before). Player "
-                     f"records end {out['records_through']}. Pinch runners, defensive subs and relief beyond this "
-                     f"half are not modelled."))
+                     f"records end {out['records_through']}. Defensive subs are not modelled. Relief from the 7th: the "
+                     f"team's usage over the last 30 days for 2022-2026 games, otherwise the pooled bullpen."))
 
         def _live_panel():
             """The live state card and its Apply button. With auto-refresh on, this

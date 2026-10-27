@@ -35,12 +35,17 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1]))
 import game as G  # noqa: E402
+import game_pen as GP  # noqa: E402
 import layer as Ly  # noqa: E402
+import pen_usage as PU  # noqa: E402
 import pa_rates as R  # noqa: E402
 from wp_engine import END, MAX_RUNS, STATES, Engine, _force, _skey, _state  # noqa: E402
 
 C = R.PA_CLASSES
 RUNS = np.arange(MAX_RUNS + 1)
+# lead state of the fielding team for every start difference (home - away): home fields in the top half
+PEN_LEAD = {"top": np.array([PU.lead_state(int(d)) for d in G.D]),
+            "bottom": np.array([PU.lead_state(int(-d)) for d in G.D])}
 HAND_BETA, HAND_K = 0.5, 2000.0
 
 
@@ -82,6 +87,10 @@ class Data:
     prm: dict | None = None                         # shrinkage (layer.PARAMS when None)
     speed: dict = field(default_factory=dict)       # id -> sprint speed z (previous season)
     speed_coef: dict = field(default_factory=dict)  # size_speed.py: E1 / E2 / E3 / SB coefficients
+    # late-inning bullpen by usage (size_pen.py variant B): available reliever -> usage (3 innings x 4 lead
+    # states) over the 30 days before the game; None = the pooled bullpen in every later half (v1)
+    pen_avail_fld: dict | None = None
+    pen_avail_bat: dict | None = None
 
 
 def _counts(d: dict, k) -> np.ndarray:
@@ -154,14 +163,48 @@ def _speed_T(T: np.ndarray, base: int, dz: float, coef: dict) -> np.ndarray:
 class Bench:
     def __init__(self, eng: Engine, ct: dict, unit: bool = False):
         self.eng, self.ct, self.unit = eng, ct, unit      # unit=True: every multiplier 1 (gate)
+        self._cache = {}
+        self.exact_lineups = False                        # True: bullpen mixture recomputed for every lineup (slow)
+
+    def _rp_dist(self, half, lineup, pid, pcounts, dfn, park):
+        k = (half, tuple(lineup), pid, id(pcounts) if pid == "pool" else None)
+        if k not in self._cache:
+            self._cache[k] = self._dist(half, _mult(self._data, lineup, None if pid == "pool" else pid, pcounts, dfn, park))
+        return self._cache[k]
+
+    def _late_tables(self, m, data, half, lineup, avail: dict, pool_counts, dfn, slot_pick) -> dict:
+        """{(inning idx, lead state, start state): runs (R,)} for innings 7+ of
+        the team pitching in `half` (size_pen.py variant B)."""
+        W, tot = PU.weights(avail, list(avail), "B")
+        pool_w = PU.KAPPA / (PU.KAPPA + tot)
+        pool = self._rp_dist(half, lineup, "pool", pool_counts, dfn, m.park)
+        out = {}
+        for (ii, ls), w in W.items():
+            sw = sum(w.values())
+            for st in (G.S_EMPTY, G.S_RUNNER2):
+                base = slot_pick(pool, st)
+                if sw <= 0:
+                    out[(ii, ls, st)] = base
+                    continue
+                mix = sum(x * slot_pick(self._rp_dist(half, lineup, p, _counts(data.pit, p), dfn, m.park), st)
+                          for p, x in w.items()) / sw
+                out[(ii, ls, st)] = pool_w * base + (1 - pool_w) * mix
+        return out
 
     def _dist(self, half, M, T=None):
         ct = self.ct if T is None else {**self.ct, half: {"P": self.ct[half]["P"], "T": T}}
         return Ly.run_dist(ct, half, np.ones_like(M) if self.unit else M)
 
-    def later_halves(self, m: Moment, data: Data, lineup) -> dict:
+    def later_halves(self, m: Moment, data: Data, lineup, exclude=()) -> dict:
         """H table for the later half-innings (v1 rules) with `lineup` for
-        the batting team."""
+        the batting team. With bullpen usage in `data` (pen_avail_*), innings
+        7+ face the usage mixture of the available relievers (size_pen.py B),
+        without the current pitcher and `exclude` for the fielding team.
+        For a lineup other than m.lineup the fielding team's mixture is
+        the pooled bullpen plus the mixture's difference from the pool
+        measured with m.lineup (approximation; error in bench_pen_check.py)."""
+        if data.pen_avail_fld is not None or data.pen_avail_bat is not None:
+            return self._later_halves_pen(m, data, lineup, tuple(exclude))
         other = "bottom" if m.half == "top" else "top"
         X_cur = self._dist(m.half, _mult(data, lineup, m.pitcher, _counts(data.pit, m.pitcher), data.def_fld, m.park))
         X_pen = self._dist(m.half, _mult(data, lineup, None, data.pen_fld, data.def_fld, m.park))
@@ -178,6 +221,49 @@ class Bench:
 
         return G.game_wp(start_dist, m.sched, extra_runner=m.extra_runner)
 
+    def _later_halves_pen(self, m: Moment, data: Data, lineup, exclude: tuple) -> dict:
+        self._data = data
+        other = "bottom" if m.half == "top" else "top"
+        first_y = (m.inning, "bottom") if m.half == "top" else (m.inning + 1, "top")
+        X_cur = self._rp_dist(m.half, lineup, m.pitcher, _counts(data.pit, m.pitcher), data.def_fld, m.park)
+        X_pen = self._rp_dist(m.half, lineup, "pool", data.pen_fld, data.def_fld, m.park)
+        Y_bp = self._rp_dist(other, m.fld_lineup, m.bat_pitcher, _counts(data.pit, m.bat_pitcher), data.def_bat, m.park)
+        Y_pen = self._rp_dist(other, m.fld_lineup, "pool", data.pen_bat, data.def_bat, m.park)
+        avg = lambda dd, st: dd[:, st].mean(axis=0)
+        nxt = lambda dd, st: dd[m.fld_next, st]
+        drop = {m.pitcher, *exclude}
+        av_f = {p: u for p, u in (data.pen_avail_fld or {}).items() if p not in drop}
+        av_b = {p: u for p, u in (data.pen_avail_bat or {}).items() if p != m.bat_pitcher}
+        exact = self.exact_lineups or tuple(lineup) == tuple(m.lineup)
+        key = ("Xl", exclude, tuple(lineup) if exact else tuple(m.lineup))
+        if key not in self._cache:
+            self._cache[key] = self._late_tables(m, data, m.half, list(key[2]), av_f, data.pen_fld, data.def_fld, avg)
+        Xl = self._cache[key]
+        if not exact:                                        # pool(lineup) + (mixture - pool) at m.lineup
+            p0 = self._rp_dist(m.half, m.lineup, "pool", data.pen_fld, data.def_fld, m.park)
+            Xl = {k: v + avg(X_pen, k[2]) - avg(p0, k[2]) for k, v in Xl.items()}
+        if ("Yl",) not in self._cache:
+            self._cache[("Yl",)] = (self._late_tables(m, data, other, m.fld_lineup, av_b, data.pen_bat, data.def_bat, avg),
+                                    self._late_tables(m, data, other, m.fld_lineup, av_b, data.pen_bat, data.def_bat, nxt))
+        Yl_avg, Yl_first = self._cache[("Yl",)]
+
+        def pen(tab, i2, h2, st):
+            ii = 3 if i2 >= 10 else i2 - 7
+            return np.stack([tab[(ii, ls, st)] for ls in PEN_LEAD[h2]])
+
+        def start_dist(i2, h2, st):
+            if h2 == m.half:
+                if m.cur_is_starter and i2 <= G.STARTER_LAST:
+                    return avg(X_cur, st)
+                return avg(X_pen, st) if i2 < 7 or data.pen_avail_fld is None else pen(Xl, i2, h2, st)
+            if m.bat_pitcher_is_starter and i2 <= G.STARTER_LAST:
+                return nxt(Y_bp, st) if (i2, h2) == first_y else avg(Y_bp, st)
+            if i2 < 7 or data.pen_avail_bat is None:
+                return nxt(Y_pen, st) if (i2, h2) == first_y else avg(Y_pen, st)
+            return pen(Yl_first if (i2, h2) == first_y else Yl_avg, i2, h2, st)
+
+        return GP.game_wp(start_dist, m.sched, extra_runner=m.extra_runner)
+
     def _from(self, dist, slot, transitions) -> np.ndarray:
         """Runs in the rest of the half after immediate `transitions`
         [(next_state, runs, p)], the next batter in `slot`."""
@@ -192,6 +278,7 @@ class Bench:
         return tot
 
     def options(self, m: Moment, data: Data, pinch_hitters=(), relievers=(), pinch_runners=()) -> list[dict]:
+        self._cache = {}
         s = _state(m.outs, *m.bases)
         si = STATES.index(s)
         base_cur = _mult(data, m.lineup, m.pitcher, _counts(data.pit, m.pitcher), data.def_fld, m.park)
@@ -274,10 +361,13 @@ class Bench:
                     res.append({"option": f"pinch_run:{x}", "side": "offense", "runs_mean": float(RUNS @ runs / runs.sum()),
                                 "p_score": float(1 - runs[0] / runs.sum()), "wp_offense": res[0]["wp_offense"] + float(dw),
                                 "speed_gain_sd": float(zx - z0), "replaces": rid})
-        H_pen = self.later_halves(replace(m, cur_is_starter=False), data, m.lineup) if relievers else None
+        usage = data.pen_avail_fld is not None
+        H_pen = self.later_halves(replace(m, cur_is_starter=False), data, m.lineup) if relievers and not usage else None
         for rp in relievers:                            # the starter is gone: later halves face the bullpen
             d2 = self._dist(m.half, _mult(data, m.lineup, rp, _counts(data.pit, rp), data.def_fld, m.park))
-            add(f"pitch_change:{rp}", "defense", np.clip(d2[m.slot, si], 0, None), H_pen)
+            # with usage: rp is not available later (using the closer now costs the 9th)
+            Hr = self.later_halves(replace(m, cur_is_starter=False), data, m.lineup, exclude=(rp,)) if usage else H_pen
+            add(f"pitch_change:{rp}", "defense", np.clip(d2[m.slot, si], 0, None), Hr)
         none = res[0]
         for r in res:
             r["delta_wp_offense"] = r["wp_offense"] - none["wp_offense"]

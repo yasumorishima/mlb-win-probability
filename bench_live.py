@@ -21,6 +21,7 @@ of individual fielders (no measurable effect in the sizing).
 from __future__ import annotations
 
 import json
+from datetime import date
 import sys
 from functools import lru_cache
 from pathlib import Path
@@ -30,6 +31,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "research" / "player_layer"))
 import bench as B  # noqa: E402
+import pen_usage as PU  # noqa: E402
 from live_feed import _BASE, _fetch, parse_live_state  # noqa: E402
 from wp_engine import Engine  # noqa: E402
 
@@ -137,6 +139,21 @@ def moment_from_feed(feed: dict) -> tuple[B.Moment, B.Data, dict] | None:
                     bat_team=bat_id, runner_ids=runner_ids)
 
 
+def pen_usage_for(gd: dict, team, bullpen) -> dict | None:
+    """Available relievers' late-inning usage over the 30 days before the
+    game (pen_usage.py); None when there is no usage table for the season
+    (e.g. a live game after the last published season): pooled bullpen."""
+    day = str(gd.get("datetime", {}).get("officialDate") or "")
+    if not day or team is None or gd.get("game", {}).get("type", "R") != "R":
+        return None
+    d = date.fromisoformat(day[:10])
+    if not PU.available(d.year):
+        return None
+    u, tired = PU.usage(int(team), d), PU.tired(int(team), d)
+    roster = {int(i) for i in bullpen or []}
+    return {p: v for p, v in u.items() if p not in tired and (not roster or p in roster)}
+
+
 def assemble(feed: dict, st: dict, s: dict, *, half, lineup, slot, batter, fld_lineup, fld_next, pitcher, bat_pitcher,
              cur_is_starter, bat_pitcher_is_starter, bench, bullpen_fld, bullpen_bat, fld_team, bat_team, runner_ids):
     """Moment + Data + extra from the pieces of a game moment (live or replayed)."""
@@ -169,12 +186,14 @@ def assemble(feed: dict, st: dict, s: dict, *, half, lineup, slot, batter, fld_l
                   def_bat=np.asarray(s["dfn"].get(str(bat_team), [0, 0, 0, 0]), float),
                   hands=_hand_from_feed(feed, s["_hands"]), split_bat=s["_bat_vs"], split_pit=s["_pit_vs"],
                   platoon={k: np.asarray(v) for k, v in s["platoon"].items()})
+    data.pen_avail_fld, data.pen_avail_bat = pen_usage_for(gd, fld_team, bullpen_fld), pen_usage_for(gd, bat_team, bullpen_bat)
     names = {int(p["id"]): p.get("fullName", str(p["id"])) for p in gd.get("players", {}).values() if "id" in p}
     role = s.get("role", {})
     relievers = [i for i in bullpen_fld
                  if (r := role.get(str(i))) is None or r[0] * 2 < r[1]]   # mostly relief work in the last two seasons (unknown: kept)
     extra = {"bench": list(bench), "bullpen": relievers, "names": names,
-             "state": st, "batter": int(batter), "records_through": s["records_through"]}
+             "state": st, "batter": int(batter), "records_through": s["records_through"],
+             "pen_usage": data.pen_avail_fld is not None}
     return m, data, extra
 
 
@@ -212,7 +231,32 @@ def bench_options(feed: dict, max_pinch: int = MAX_PINCH, max_relief: int = MAX_
     defense = [o for o in opts if o["kind"] == "intentional_walk"] + rp
     return {"offense": offense, "defense": defense, "all": opts, "batter": nm.get(extra["batter"], ""),
             "pitcher": nm.get(m.pitcher, ""), "records_through": extra["records_through"],
-            "state": extra["state"]}
+            "state": extra["state"], "pen_plan": pen_plan(m, data, nm)}
+
+
+def pen_plan(m, data, names: dict, top: int = 3) -> list[dict] | None:
+    """Who the model expects to pitch the 7th / 8th / 9th for the fielding
+    team at the current lead (usage mixture without the current pitcher):
+    [{inning, rows: [(name, share)], other: share of the pooled bullpen}]."""
+    if data.pen_avail_fld is None:
+        return None
+    av = {p: u for p, u in data.pen_avail_fld.items() if p != m.pitcher}
+    W, tot = PU.weights(av, list(av), "B")
+    pool_w = PU.KAPPA / (PU.KAPPA + tot)
+    lead = m.diff if m.half == "top" else -m.diff          # the fielding team is home in the top half
+    ls = PU.lead_state(int(lead))
+    out = []
+    for ii, inn in enumerate((7, 8, 9)):
+        if inn < m.inning:
+            continue
+        w = W[(ii, ls)]
+        sw = sum(w.values())
+        if sw <= 0:
+            out.append({"inning": inn, "rows": [], "other": 1.0})
+            continue
+        rows = sorted(((names.get(p, str(p)), (1 - pool_w) * x / sw) for p, x in w.items()), key=lambda r: -r[1])
+        out.append({"inning": inn, "rows": rows[:top], "other": 1 - sum(r[1] for r in rows[:top])})
+    return out
 
 
 def matchups(feed: dict, n_next: int = 3, got=None) -> dict | None:
