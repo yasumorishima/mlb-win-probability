@@ -37,6 +37,7 @@ SNAPSHOT = ROOT / "research/player_layer/published/bench_snapshot.json"
 MAX_PINCH, MAX_RELIEF = 6, 6
 
 LABEL_JA = {"none": "そのまま", "bunt": "送りバント", "intentional_walk": "敬遠"}
+LABEL_EN = {"none": "no move", "bunt": "sac bunt", "intentional_walk": "intentional walk"}
 MAX_RUN = 3
 
 
@@ -201,6 +202,8 @@ def bench_options(feed: dict, max_pinch: int = MAX_PINCH, max_relief: int = MAX_
             o["kind"] = "steal"
             continue
         o["label_ja"] = LABEL_JA.get(kind) or {"pinch_hit": "代打", "pinch_run": "代走", "pitch_change": "継投"}[kind] + \
+            f" {nm.get(int(pid), pid)}"
+        o["label_en"] = LABEL_EN.get(kind) or {"pinch_hit": "PH", "pinch_run": "PR", "pitch_change": "new P"}[kind] + \
             f" {nm.get(int(pid), pid)}"
     ph = sorted([o for o in opts if o["kind"] == "pinch_hit"], key=lambda o: -o["wp_offense"])[:max_pinch]
     rp = sorted([o for o in opts if o["kind"] == "pitch_change"], key=lambda o: o["wp_offense"])[:max_relief]

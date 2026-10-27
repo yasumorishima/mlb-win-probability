@@ -44,9 +44,9 @@ frames = [d.value for d in at.dataframe]
 assert len(frames) == 2, len(frames)
 off, dfn = frames
 col = off.columns[0]
-assert ("送りバント" if lang == "JA" else "bunt") in list(off[col]), list(off[col])
-assert any(str(x).startswith("代打" if lang == "JA" else "pinch_hit") for x in off[col])
-assert ("敬遠" if lang == "JA" else "intentional_walk") in list(dfn[dfn.columns[0]])
+assert ("送りバント" if lang == "JA" else "sac bunt") in list(off[col]), list(off[col])
+assert any(str(x).startswith("代打" if lang == "JA" else "PH ") for x in off[col])
+assert ("敬遠" if lang == "JA" else "intentional walk") in list(dfn[dfn.columns[0]])
 cap = " ".join(c.value for c in at.caption)
 assert "2026-09-27" in cap, cap
 # a rerun without a new fetch does not recompute (no second feed call)
