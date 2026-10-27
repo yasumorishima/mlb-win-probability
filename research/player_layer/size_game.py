@@ -111,7 +111,8 @@ def park_table(hf: Path) -> dict:
     for r in pf.itertuples():
         v = np.ones(len(C))
         for c, col in PF_COLS.items():
-            v[C.index(c)] = getattr(r, col) / 100.0
+            x = getattr(r, col)
+            v[C.index(c)] = 1.0 if pd.isna(x) else x / 100.0      # missing factor = average
         out[(r.team, r.season + 1)] = v                       # used in the following season
     return out
 
