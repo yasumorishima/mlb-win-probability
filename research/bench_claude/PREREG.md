@@ -100,7 +100,18 @@ ties, a resumable pilot. Tests in `tests/test_bench_replay.py` catch both blocki
 (numbers generated from results.json).
 
 ## Frozen
-(md5 list added in the freeze commit)
+Paths relative to `research/bench_claude/`. Built and committed at `d1f9a96` (the items embed the
+moments, candidates, labels, MODEL / USAGE picks and both payloads, so the app code may change later
+without changing what is scored). Check with `md5sum -c` before the pilot and before analyze.
+
+```
+ff122e73e0c57a9e161ea0878d75c1ff  build_items.py
+bbc312c96bd0359d25a2293d62caec94  run_claude.py
+7da186a0a4be81735ad63484ef33c449  analyze.py
+e919545680747028d08e199038663913  inputs/items_test.jsonl
+dbb2fe818d712e837639d110eb47c820  inputs/games_test.json
+9fced7decf3c8612717a59470b678f52  inputs/items_pilot.jsonl
+```
 
 ## Amendments
 (none yet)
