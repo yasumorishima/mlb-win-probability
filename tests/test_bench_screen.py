@@ -42,6 +42,8 @@ dt = time.time() - t0
 assert not at.exception, at.exception
 assert calls == [7], calls                                   # the game in progress is chosen by itself
 assert at.selectbox(key="bench_select").value == 7
+charts = at.get("plotly_chart")
+assert len(charts) == 3, len(charts)                         # matchups, offense options, defense options (no plays yet)
 frames = [d.value for d in at.dataframe]
 assert len(frames) == 3, len(frames)                         # matchups, offense, defense
 mu = frames[0]

@@ -21,6 +21,7 @@ from datetime import datetime, timezone
 import streamlit as st
 
 import bench_live
+import bench_viz
 from analysis import leverage_index, li_label, state_wp, team_layer_wp
 from live_feed import get_todays_games, has_live_state, is_game_over_status, is_not_started, parse_live_state
 
@@ -45,6 +46,12 @@ T = {
                    "confirmed on 2026). Player records through {d}. Pinch runners, defensive subs and relief beyond this half "
                    "are not modelled."},
 }
+
+
+def _li_word(label: str, lang: str) -> str:
+    if lang != "JA":
+        return label
+    return {"Low": "低い", "Medium": "普通", "High": "高い", "Very High": "勝負所"}.get(label, label)
 
 
 def _games() -> list[dict]:
@@ -78,6 +85,10 @@ def _computed(feed: dict) -> dict:
         except Exception as e:          # never break the screen
             out["options"] = out["matchups"] = None
             out["error"] = repr(e)[:200]
+        try:
+            out["series"] = bench_viz.wp_series(feed)
+        except Exception:
+            out["series"] = []
         st.session_state["bench_cache"] = out
     return st.session_state["bench_cache"]
 
@@ -111,42 +122,67 @@ def _panel(lang: str) -> None:
     opts = c.get("options")
     player_wp = opts["offense"][0]["wp_offense"] if opts else None
     li = leverage_index(s["inning"], s["top_bottom"], s["outs"], s["runners"], s["score_diff"], sched, xr) if s["outs"] < 3 else 0.0
-    bases = "".join(b if r else "·" for b, r in zip(("一", "二", "三") if lang == "JA" else ("1", "2", "3"), s["runners"]))
-    left, right = st.columns([2, 3])
+    hot = li >= 1.5
+    st.markdown(
+        "<style>@keyframes lipulse{0%{box-shadow:0 0 0 0 rgba(230,103,103,.55)}70%{box-shadow:0 0 0 14px rgba(230,103,103,0)}"
+        "100%{box-shadow:0 0 0 0 rgba(230,103,103,0)}}"
+        ".li-hot{animation:lipulse 1.6s infinite;border-radius:10px}"
+        "@keyframes wpin{from{opacity:.25;transform:translateY(6px)}to{opacity:1;transform:none}}"
+        ".wp-big{animation:wpin .6s ease-out}</style>", unsafe_allow_html=True)
+    left, mid, right = st.columns([2, 2, 4])
     with left:
         st.markdown(
             f'<div style="background:#141428;border-radius:12px;padding:14px;">'
-            f'<div style="color:#aaa">{html.escape(s["away_team"])} @ {html.escape(s["home_team"])}</div>'
-            f'<div style="font-size:2.2rem;font-weight:bold;color:#fff">{s["score_away"]} – {s["score_home"]}</div>'
-            f'<div style="font-size:1.2rem;color:#ccc">{s["inning"]}{t["top"] if s["top_bottom"] == "top" else t["bot"]}'
-            f' &nbsp; {s["outs"]} {t["outs"]} &nbsp; [{bases}]'
+            f'<div style="color:#c3c2b7">{html.escape(s["away_team"])} @ {html.escape(s["home_team"])}</div>'
+            f'<div style="font-size:2.4rem;font-weight:bold;color:#f0efec">{s["score_away"]} – {s["score_home"]}</div>'
+            f'<div style="font-size:1.2rem;color:#c3c2b7">{s["inning"]}{t["top"] if s["top_bottom"] == "top" else t["bot"]}'
             + (f' &nbsp; {s["balls"]}-{s["strikes"]}' if s.get("balls") is not None else "") + '</div>'
-            f'<div style="margin-top:10px;color:#aaa">{html.escape(t["wp"].format(team=bat_team))}</div>'
-            f'<div style="font-size:3rem;font-weight:bold;color:#00e5ff">{bat_wp:.0%}</div>'
-            + (f'<div style="color:#ccc">{t["player"]} {player_wp:.0%}</div>' if player_wp is not None else "")
-            + f'<div style="margin-top:8px;color:#ccc">{t["li"]} <b style="font-size:1.4rem;color:#ff9800">{li:.1f}</b>'
-            f' ({li_label(li)})</div></div>', unsafe_allow_html=True)
+            + bench_viz.diamond(s["runners"], min(s["outs"], 3)) + '</div>', unsafe_allow_html=True)
+    with mid:
+        st.markdown(
+            f'<div style="background:#141428;border-radius:12px;padding:14px;">'
+            f'<div style="color:#c3c2b7">{html.escape(t["wp"].format(team=bat_team))}</div>'
+            f'<div class="wp-big" style="font-size:3.4rem;font-weight:bold;color:#f0efec">{bat_wp:.0%}</div>'
+            + (f'<div style="color:#c3c2b7">{t["player"]} <b style="color:#f0efec">{player_wp:.0%}</b></div>'
+               if player_wp is not None else "")
+            + f'<div class="{"li-hot" if hot else ""}" style="margin-top:12px;padding:8px 10px;background:#1f1f3a">'
+            f'<span style="color:#c3c2b7">{t["li"]}</span> '
+            f'<b style="font-size:1.8rem;color:{"#e66767" if hot else "#f0efec"}">{li:.1f}</b>'
+            f' <span style="color:#898781">{_li_word(li_label(li), lang)}</span></div></div>', unsafe_allow_html=True)
     with right:
         mu = c.get("matchups")
         if mu:
             st.markdown(f"**{html.escape(t['matchup'].format(p=mu['pitcher']))}**")
-            st.dataframe([{t["batter"]: (t["now"] if r["order"] == 0 else t["next"].format(n=r["order"])) + "  " + r["name"],
-                           t["on_base"]: f"{r['p_on_base']:.0%}", t["k"]: f"{r['p_k']:.0%}",
-                           t["xbh"]: f"{r['p_xbh']:.0%}", t["hr"]: f"{r['p_hr']:.1%}"} for r in mu["rows"]],
-                         hide_index=True, width="stretch")
+            st.plotly_chart(bench_viz.fig_matchups(mu, lang), width="stretch", config={"displayModeBar": False})
         elif not opts:
             st.caption(t["cannot"])
+    series = c.get("series") or []
+    if len(series) > 1:
+        st.plotly_chart(bench_viz.fig_wp(series, s["home_team"], s["away_team"], lang), width="stretch",
+                        config={"displayModeBar": False})
     if opts:
+        for o in opts["offense"]:
+            if o["kind"] == "steal":
+                st.markdown(bench_viz.steal_badge(o, lang), unsafe_allow_html=True)
+        a, b = st.columns(2)
+        with a:
+            st.plotly_chart(bench_viz.fig_options(opts["offense"], lang, t["off"] + f"（{opts['batter']}）"),
+                            width="stretch", config={"displayModeBar": False})
+        with b:
+            st.plotly_chart(bench_viz.fig_options(opts["defense"], lang, t["def"] + f"（{opts['pitcher']}）"),
+                            width="stretch", config={"displayModeBar": False})
+
         def rows(o):
             return [{t["opt"]: x["label_ja"] if lang == "JA" else x.get("label_en", x["option"]), t["runs"]: round(x["runs_mean"], 2),
                      t["score"]: f"{x['p_score']:.0%}", t["owp"]: f"{x['wp_offense']:.1%}",
                      t["delta"]: f"{100 * x['delta_wp_offense']:+.1f}"} for x in o]
-        a, b = st.columns(2)
-        with a:
-            st.markdown(f"**{t['off']}**")
+        with st.expander("表で見る" if lang == "JA" else "Show as tables"):
+            if mu:
+                st.dataframe([{t["batter"]: (t["now"] if r["order"] == 0 else t["next"].format(n=r["order"])) + "  " + r["name"],
+                               t["on_base"]: f"{r['p_on_base']:.0%}", t["k"]: f"{r['p_k']:.0%}",
+                               t["xbh"]: f"{r['p_xbh']:.0%}", t["hr"]: f"{r['p_hr']:.1%}"} for r in mu["rows"]],
+                             hide_index=True, width="stretch")
             st.dataframe(rows(opts["offense"]), hide_index=True, width="stretch")
-        with b:
-            st.markdown(f"**{t['def']}**")
             st.dataframe(rows(opts["defense"]), hide_index=True, width="stretch")
         st.caption(t["note"].format(d=opts["records_through"]))
 
