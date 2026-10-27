@@ -114,4 +114,40 @@ dbb2fe818d712e837639d110eb47c820  inputs/games_test.json
 ```
 
 ## Amendments
-(none yet)
+### Amendment 1 — live calls instead of Batches (2026-10-27, before any test answer was read)
+- What happened: batches B `msgbatch_013NQfX1LFwkmhw89UsW9V5y` and C `msgbatch_017orJ7zmjCLNoETG3PNiafm`
+  were created 2026-10-27 10:53 UTC (expiry 2026-10-28 10:53 UTC). At 22:47 UTC, 12 hours later, both
+  still read `processing=587, succeeded=0, errored=0`. A one-request probe batch (`Say OK`, max_tokens 5,
+  `msgbatch_014qvGCYLYrQyKA1xKKCiTeK`, created 22:37 UTC) was also still processing after 10 minutes,
+  while a live call with the same key and model returned at once. The API credit expires 2026-10-29, so a
+  batch that expires on 10-28 plus a 24-hour retry batch might not finish in time.
+- Both batches and the probe were cancelled at 22:48 UTC. After the cancellation the counts read
+  B succeeded 307 / canceled 280, C succeeded 293 / canceled 294, probe canceled 1 (so the batches had been
+  progressing without the counts showing it). **Those results are never collected or read**; they are
+  billed (about half of the $8.15 batch projection) and listed in the cost.
+- Change: the 587 test items x arms B and C are sent as **live** Messages API calls by `run_live.py`,
+  which imports `params`, `load`, `record` and `append` from the frozen `run_claude.py` (same model, effort,
+  max_tokens, system prompt, schema and payloads; one call per item and arm; the SDK's own retries, max 2,
+  as in the pilot; 4 calls in parallel). Error handling, fixed now:
+  - a stop error (authentication, permission, bad request, not found, payment 402) or 5 consecutive errors
+    stops the run without recording those calls (they stay unanswered; the cause is fixed and the run
+    resumed), so a systemic failure cannot turn items into misses. Up to 4 errors just before such a stop
+    are recorded as errors;
+  - any other error is recorded; `--retry` (allowed only when every item has a record) calls each errored
+    item once more (an item with two records is never called again); still failing = miss.
+  - A process killed between an answer and its write would buy that item again on resume (disclosed if it
+    happens). A lock file prevents two runs on the same arm.
+  Raw records have the same format, so `analyze.py` runs unchanged.
+- Cost: the cap stays $40 for the test calls. Live calls cost full price, twice the batch rate: projected
+  from the pilot, 2 x $8.15 = **$16.30**, plus the cancelled batches' succeeded requests (~$4). `analyze.py`
+  prices tokens at the batch rate (`cost_usd_batch`); `write_results.py` (not frozen) now reports twice that
+  as the live cost and names the live API.
+- Nothing else changes (items, arms, metric, hypotheses, inference, readings). No agreement rate of any
+  arm has been computed and no test answer has been read.
+- Added frozen file (tested offline with a stub client: run, resume without repeats, stop on an auth / 402
+  error and on 5 consecutive errors, retry refused before the main pass is complete, one retry per item,
+  lock); check with `md5sum -c` like the list above:
+
+```
+09a14fe92801b0d336e04f12dc11f53c  run_live.py
+```
