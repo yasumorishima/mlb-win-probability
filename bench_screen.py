@@ -111,6 +111,15 @@ def _panel(lang: str) -> None:
     if not has_live_state(s["status"]) or is_not_started(s["status"]) or is_game_over_status(s["status"]):
         st.info(t["not_live"].format(s=s["status"]))
         return
+    _draw(lang, s, c.get("options"), c.get("matchups"), c.get("series") or [])
+
+
+def _draw(lang: str, s: dict, opts: dict | None, mu: dict | None, series: list, mark_i: int | None = None,
+          chart_key: str | None = None):
+    """The bench screen's cards and charts for one game moment (live or replayed).
+    Returns the WP chart's selection event when `chart_key` is given (review mode)."""
+    t = T[lang]
+    event = None
     bat_home = s["top_bottom"] == "bottom"
     bat_team = s["home_team"] if bat_home else s["away_team"]
     sched, xr = s.get("scheduled_innings", 9), s.get("extra_runner", True)
@@ -119,7 +128,6 @@ def _panel(lang: str) -> None:
     home = tl["team_wp"] if tl.get("applied") else state_wp(s["inning"], s["top_bottom"], s["outs"], s["runners"],
                                                                s["score_diff"], sched, xr)
     bat_wp = home if bat_home else 1 - home
-    opts = c.get("options")
     player_wp = opts["offense"][0]["wp_offense"] if opts else None
     li = leverage_index(s["inning"], s["top_bottom"], s["outs"], s["runners"], s["score_diff"], sched, xr) if s["outs"] < 3 else 0.0
     hot = li >= 1.5
@@ -150,16 +158,18 @@ def _panel(lang: str) -> None:
             f'<b style="font-size:1.8rem;color:{"#e66767" if hot else "#f0efec"}">{li:.1f}</b>'
             f' <span style="color:#898781">{_li_word(li_label(li), lang)}</span></div></div>', unsafe_allow_html=True)
     with right:
-        mu = c.get("matchups")
         if mu:
             st.markdown(f"**{html.escape(t['matchup'].format(p=mu['pitcher']))}**")
             st.plotly_chart(bench_viz.fig_matchups(mu, lang), width="stretch", config={"displayModeBar": False})
         elif not opts:
             st.caption(t["cannot"])
-    series = c.get("series") or []
     if len(series) > 1:
-        st.plotly_chart(bench_viz.fig_wp(series, s["home_team"], s["away_team"], lang), width="stretch",
-                        config={"displayModeBar": False})
+        fig = bench_viz.fig_wp(series, s["home_team"], s["away_team"], lang, mark_i=mark_i)
+        if chart_key:
+            event = st.plotly_chart(fig, width="stretch", config={"displayModeBar": False}, key=chart_key,
+                                    on_select="rerun", selection_mode="points")
+        else:
+            st.plotly_chart(fig, width="stretch", config={"displayModeBar": False})
     if opts:
         for o in opts["offense"]:
             if o["kind"] == "steal":
@@ -187,9 +197,18 @@ def _panel(lang: str) -> None:
         st.caption(t["note"].format(d=opts["records_through"]))
 
 
+    return event
+
+
 def render(lang: str) -> None:
     t = T[lang]
     st.markdown(f"## {t['title']}")
+    view = st.radio("", ["ライブ", "振り返り"] if lang == "JA" else ["Live", "Look back"], horizontal=True,
+                    key=f"bench_view_{lang}", label_visibility="collapsed")
+    if view in ("振り返り", "Look back"):
+        import bench_review
+        bench_review.render(lang)
+        return
     games = _games()
     if not games:
         st.info(t["none"])

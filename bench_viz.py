@@ -70,7 +70,7 @@ def wp_series(feed: dict) -> list[dict]:
     return out
 
 
-def fig_wp(series: list[dict], home: str, away: str, lang: str, animate: bool = True) -> go.Figure:
+def fig_wp(series: list[dict], home: str, away: str, lang: str, animate: bool = True, mark_i: int | None = None) -> go.Figure:
     """Home WP over the game: a line with the area above / below 50% in the
     home / away color, the three biggest swings marked and labelled, and a
     play button that redraws the game from the first pitch."""
@@ -86,7 +86,8 @@ def fig_wp(series: list[dict], home: str, away: str, lang: str, animate: bool = 
                              hoverinfo="skip", showlegend=False))
     fig.add_trace(go.Scatter(x=x, mode="lines", y=[min(v, 50) for v in y], line=dict(width=0), fill="tonexty",
                              fillcolor="rgba(230,103,103,0.22)", hoverinfo="skip", showlegend=False))
-    fig.add_trace(go.Scatter(x=x, y=y, mode="lines", line=dict(color=INK, width=2), hovertext=hover,
+    fig.add_trace(go.Scatter(x=x, y=y, mode="lines+markers", line=dict(color=INK, width=2), hovertext=hover,
+                             marker=dict(size=9, color="rgba(0,0,0,0)"),       # invisible, but tappable (review)
                              hoverinfo="text", name=home, showlegend=False))
     swings = []
     gap = max(4, len(series) // 12)                 # keep the marked swings apart so their labels do not collide
@@ -101,7 +102,11 @@ def fig_wp(series: list[dict], home: str, away: str, lang: str, animate: bool = 
                              text=[f"{s['label' if ja else 'label_en']} {100 * s['delta']:+.0f}" for s in swings],
                              textposition="top center", textfont=dict(color=INK, size=12), hoverinfo="skip",
                              showlegend=False))
-    if x:
+    if mark_i is not None and 0 <= mark_i < len(x):       # the moment being looked at (review)
+        fig.add_vline(x=mark_i, line=dict(color="#f0efec", width=1, dash="dot"))
+        fig.add_trace(go.Scatter(x=[mark_i], y=[y[mark_i]], mode="markers", marker=dict(size=16, color="#f0efec",
+                                 line=dict(color=SURFACE, width=3)), hoverinfo="skip", showlegend=False))
+    elif x:
         fig.add_trace(go.Scatter(x=[x[-1]], y=[y[-1]], mode="markers", marker=dict(size=14, color=INK,
                                  line=dict(color=HOME if y[-1] >= 50 else AWAY, width=3)), hoverinfo="skip", showlegend=False))
     lay = _base_layout(300)
@@ -143,9 +148,12 @@ def fig_options(rows: list[dict], lang: str, title: str) -> go.Figure:
                                                                            line=dict(color=SURFACE, width=2)),
                            text=[f"{v:+.1f}" if abs(v) >= 0.95 else f"{v:+.2f}" for v in vals], textposition="outside", textfont=dict(color=INK, size=12),
                            hovertemplate="%{y}: %{x:+.2f} pt<extra></extra>", width=0.6))
-    lay = _base_layout(max(120, 34 * len(rows) + 60))
+    lay = _base_layout(max(140, 34 * len(rows) + 80))
+    lay["margin"] = dict(l=48, r=16, t=56, b=36)
     span = max([abs(v) for v in vals] + [0.5]) * 1.35
-    lay.update(title=dict(text=title, font=dict(color=INK, size=14), x=0, xanchor="left"),
+    key = ("<span style='font-size:11px;color:#c3c2b7'>青＝攻撃側に有利　赤＝守備側に有利（勝率の増減、ポイント）</span>" if ja else
+           "<span style='font-size:11px;color:#c3c2b7'>blue = helps the batting team, red = helps the fielding team (WP points)</span>")
+    lay.update(title=dict(text=f"{title}<br>{key}", font=dict(color=INK, size=14), x=0, xanchor="left"),
                xaxis=dict(range=[-span, span], gridcolor=GRID, zeroline=True, zerolinecolor=MUTED, zerolinewidth=1,
                           ticksuffix=" pt"),
                yaxis=dict(automargin=True, tickfont=dict(color=INK, size=12)), bargap=0.35,
