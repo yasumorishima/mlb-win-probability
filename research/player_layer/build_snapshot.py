@@ -91,10 +91,17 @@ def main() -> None:
     def wcounts(key):
         t = pd.crosstab(done[key], done.cls, values=wgt, aggfunc="sum").reindex(columns=C).fillna(0.0)
         return {str(k): [round(float(x), 3) for x in v] for k, v in zip(t.index, t.to_numpy())}
+    # runner speed (size_speed.py): latest-season sprint speed as z, and the fitted coefficients
+    spd = pd.read_parquet(a.hf / "sprint_speed.parquet")
+    sz = json.loads((HERE / "published/size_speed.json").read_text())
+    latest = spd.sort_values("season").groupby("player_id").tail(1)
+    speed = {str(int(r.player_id)): round((r.sprint_speed - sz["speed_mean"]) / sz["speed_sd"], 3) for r in latest.itertuples()}
+    speed_coef = {k: v["coef_all_2021_2025"] for k, v in sz["events"].items()}
     snap = {
         "classes": C, "bip": R.BIP, "records_through": str(done.date.max().date()),
         "bat": {str(k): v.tolist() for k, v in zip(counts(done, ["batter"]).index, counts(done, ["batter"]).to_numpy())},
         "pit": {str(k): v.tolist() for k, v in zip(counts(done, ["pitcher"]).index, counts(done, ["pitcher"]).to_numpy())},
+        "speed": speed, "speed_coef": speed_coef, "speed_through": int(spd.season.max()),
         "bat_decay": wcounts("batter"), "pit_decay": wcounts("pitcher"), "decay": {"lam": 0.6, "k_scale": 0.7},
         "bat_vs": {f"{b}|{h}": v.tolist() for (b, h), v in zip(counts(done, ["batter", "phand"]).index, counts(done, ["batter", "phand"]).to_numpy())},
         "pit_vs": {f"{p}|{h}": v.tolist() for (p, h), v in zip(counts(done, ["pitcher", "bside"]).index, counts(done, ["pitcher", "bside"]).to_numpy())},

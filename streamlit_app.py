@@ -698,7 +698,7 @@ with st.container():
                                "Could not read the lineups / bench for this moment.")
                     return
                 def rows(opts):
-                    return [{("選択肢" if ja else "Option"): (o["label_ja"] if ja else o["option"]),
+                    return [{("選択肢" if ja else "Option"): (o["label_ja"] if ja else o.get("label_en", o["option"])),
                              ("得点期待値（この回）" if ja else "Runs (this half)"): round(o["runs_mean"], 2),
                              ("1点以上" if ja else "P(score)"): f"{o['p_score']:.0%}",
                              ("攻撃側の勝率" if ja else "Offense WP"): f"{o['wp_offense']:.1%}",

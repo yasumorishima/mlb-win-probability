@@ -40,7 +40,8 @@ def main() -> None:
     t = pa[pa.cls.isin(C) & pa.pa_complete]
     L = t.cls.value_counts(normalize=True).reindex(C).to_numpy()
     z = np.zeros(len(C))
-    data = B.Data(L=L, bat={}, pit={}, pen_fld=z, pen_bat=z, def_fld=np.zeros(4), def_bat=np.zeros(4))
+    sc = {"SB": {"intercept": 1.5, "x2": 0.0, "speed_z": 0.1, "missing": 0.0}}
+    data = B.Data(L=L, bat={}, pit={}, pen_fld=z, pen_bat=z, def_fld=np.zeros(4), def_bat=np.zeros(4), speed_coef=sc)
     unit = B.Bench(eng, ct, unit=True)
     worst = 0.0
     n = 0
@@ -53,7 +54,11 @@ def main() -> None:
         wp = eng.wp(inn, half, outs, bases, diff, 9)
         off = wp if half == "bottom" else 1 - wp
         worst = max(worst, abs(opts["none"]["wp_offense"] - off))
+        steals = {k: v for k, v in opts.items() if k.startswith("steal_")}
         for t_ in eng.tactics(inn, half, outs, bases, diff, 9):
+            if t_.tactic in ("steal_2b", "steal_3b"):
+                o = [v for k, v in steals.items() if k.startswith(t_.tactic)][0]
+                worst = max(worst, abs(o["breakeven"] - min(t_.breakeven, 1.0)))
             if t_.tactic == "sacrifice_bunt":
                 worst = max(worst, abs(opts["bunt"]["wp_offense"] - t_.wp_if))
             if t_.tactic == "intentional_walk":

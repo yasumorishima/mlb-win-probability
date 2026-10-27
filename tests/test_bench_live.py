@@ -100,3 +100,31 @@ def test_postseason_has_no_automatic_runner():
     a = BL.bench_options(reg)["offense"][0]["wp_offense"]
     b = BL.bench_options(post)["offense"][0]["wp_offense"]
     assert abs(a - b) > 1e-4, (a, b)
+
+
+FAST = sorted(((v, int(k)) for k, v in SNAP["speed"].items() if int(k) in SNAP["_bat"]), reverse=True)
+
+
+def test_steal_call_and_pinch_runner():
+    """Runner on first: a steal row with the runner's estimated success and
+    the break-even; faster pinch runners help the offense, best first."""
+    f = feed(bench=[FAST[0][1], FAST[1][1], BATTERS[20]])
+    out = BL.bench_options(f)
+    steal = [o for o in out["offense"] if o["kind"] == "steal"]
+    assert len(steal) == 1 and 0 < steal[0]["breakeven"] < 1 and 0 < steal[0]["p_success"] < 1
+    assert steal[0]["go"] == (steal[0]["p_success"] > steal[0]["breakeven"])
+    pr = [o for o in out["offense"] if o["kind"] == "pinch_run"]
+    assert pr and all(o["delta_wp_offense"] > 0 for o in pr), pr
+    assert [o["wp_offense"] for o in pr] == sorted([o["wp_offense"] for o in pr], reverse=True)
+
+
+def test_faster_runner_steals_more_often():
+    import bench as B
+    m, data, _ = BL.moment_from_feed(feed())
+    slow = dict(data.speed); slow[1] = -2.0
+    fast = dict(data.speed); fast[1] = 2.0
+    b = BL._bench(True)
+    p_slow = [o for o in b.options(m, B.Data(**{**data.__dict__, "speed": slow})) if o["option"].startswith("steal")][0]
+    p_fast = [o for o in b.options(m, B.Data(**{**data.__dict__, "speed": fast})) if o["option"].startswith("steal")][0]
+    assert p_fast["p_success"] > p_slow["p_success"]
+    assert p_fast["breakeven"] == pytest.approx(p_slow["breakeven"])
