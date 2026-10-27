@@ -55,6 +55,8 @@ def fake_state(pk):
 
 live_feed.get_todays_games = fake_games
 live_feed.get_live_state = fake_state
+import bench_live
+bench_live.get_feed = lambda pk: None           # no network: the bench panel says it cannot read the moment
 
 # the team layer, without the network: fixed run differentials
 import team_layer
