@@ -51,9 +51,36 @@ P(≥1) improves in every season (2022 −0.0020, 2023 −0.0021, 2024 −0.0011
 2025 −0.0023). The 0.3-0.5 band bias does not move: only the current
 half-inning is player-specific so far.
 
+## Whole game (`game.py`, `size_game.py`)
+Every remaining half-inning gets a team-specific run distribution: the
+batting team's lineup as known now against the pitcher expected in that
+inning (the fielding team's starter through the 6th if he is still in,
+otherwise its bullpen = its relievers' earlier PAs this season, pooled),
+park factors at half strength. The fielding team's next turn starts at
+its known next slot; later turns average over the nine slots. The game
+recursion follows the engine's rules; with league distributions it equals
+`Engine._H` / `Engine.wp` exactly (difference 0 for 9- and 7-inning
+games), and `wp_league` equals the task-1 out-of-fold WP (difference 0).
+
+| 733,260 PAs, 2022-2025 | Brier | log loss | WP 0.3-0.5 bias |
+|---|---|---|---|
+| league (task 1 baseline) | 0.157223 | 0.467899 | +2.76 pt |
+| player, current half only | 0.156935 | 0.467174 | +2.71 pt |
+| player, whole game | **0.155197** | **0.462994** | **+1.84 pt** |
+
+Whole game − league: −0.00203 Brier (95% game bootstrap −0.00277 to
+−0.00127); every season negative (2022 −0.0030, 2023 −0.0018, 2024
+−0.0023, 2025 −0.0011). Whole game − current half: −0.00174 (−0.00246 to
+−0.00104). For scale, the team layer's pre-registered 2026 gain was
+−0.00151 vs its recalibration control (a different season and baseline:
+not comparable as a test). Calibration by tenths is in
+`published/size_game.json`; predictions below 0.5 are still too high
+(0.1-0.2: 0.150 predicted vs 0.133 observed).
+
 ## Next
-1. Whole game: carry the lineup and pitcher (starter → bullpen) into the
-   remaining half-innings, add park (V5 + park).
-2. Fielder-level defense from the real alignment.
-3. Compare with the team layer, then freeze a PREREG and score 2026 once
-   (2026 was already used for the team layer and the steal study).
+1. Fielder-level defense from the real alignment.
+2. Sizing choices still open: starter exit inning (fixed at 6), bullpen
+   pooling, batter / pitcher handedness (not in the tables yet).
+3. Compare with the team layer on the same rows, then freeze a PREREG
+   and score 2026 once (2026 was already used for the team layer and the
+   steal study).
