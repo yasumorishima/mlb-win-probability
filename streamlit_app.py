@@ -33,6 +33,7 @@ from live_feed import (
     get_live_state,
     get_todays_games,
     has_live_state,
+    is_game_over_status,
     is_not_started,
 )
 
@@ -664,6 +665,51 @@ with st.container():
             else:
                 st.warning(_["no_live_state"])
 
+        def _bench_panel(game_pk):
+            """Bench options from the player layer (bench_live.py): pinch hitters,
+            bunt, intentional walk and relievers, each with the rest-of-half
+            expected runs, the chance of scoring and the batting team's WP."""
+            if not game_pk:
+                return
+            key = (game_pk, st.session_state.get("live_last_ok", 0.0))
+            if st.session_state.get("bench_key") != key:
+                try:
+                    import bench_live
+                    feed = bench_live.get_feed(game_pk)
+                    st.session_state["bench_out"] = bench_live.bench_options(feed) if feed else None
+                except Exception as e:  # never break the live card
+                    st.session_state["bench_out"] = {"error": repr(e)[:200]}
+                st.session_state["bench_key"] = key
+            out = st.session_state.get("bench_out")
+            ja = lang == "JA"
+            with st.expander("ベンチの選択肢（選手を入れた層）" if ja else "Bench options (player layer)", expanded=True):
+                if not out or "error" in out:
+                    st.caption("この場面の打順・ベンチを読み取れませんでした。" if ja else
+                               "Could not read the lineups / bench for this moment.")
+                    return
+                def rows(opts):
+                    return [{("選択肢" if ja else "Option"): (o["label_ja"] if ja else o["option"]),
+                             ("得点期待値（この回）" if ja else "Runs (this half)"): round(o["runs_mean"], 2),
+                             ("1点以上" if ja else "P(score)"): f"{o['p_score']:.0%}",
+                             ("攻撃側の勝率" if ja else "Offense WP"): f"{o['wp_offense']:.1%}",
+                             ("差" if ja else "Change"): f"{100 * o['delta_wp_offense']:+.1f}"} for o in opts]
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown(f"**{'攻撃側' if ja else 'Offense'}**（{esc(out['batter'])}）")
+                    st.dataframe(rows(out["offense"]), hide_index=True, width="stretch")
+                with c2:
+                    st.markdown(f"**{'守備側' if ja else 'Defense'}**（{esc(out['pitcher'])}）")
+                    st.dataframe(rows(out["defense"]), hide_index=True, width="stretch")
+                st.caption(
+                    (f"打者・投手・球場・左右から打席の結果を出し、実際の打順とブルペンで残りの試合を計算した値です"
+                     f"（事前登録して 2026 年で確認。2026 年は以前の確認にも使っています）。選手の成績は "
+                     f"{out['records_through']} までで、今季の分は入っていません。代走・守備固め・この回より先の継投は"
+                     f"考えていません。") if ja else
+                    (f"Plate-appearance outcomes from batter, pitcher, park and handedness, played out with the real "
+                     f"lineups and bullpen (pre-registered and confirmed on 2026, a season used before). Player "
+                     f"records end {out['records_through']}. Pinch runners, defensive subs and relief beyond this "
+                     f"half are not modelled."))
+
         def _live_panel():
             """The live state card and its Apply button. With auto-refresh on, this
             runs as a fragment every 30 s, so the state is fetched again without
@@ -714,6 +760,8 @@ with st.container():
 
                 if has_live_state(cached["status"]) and not is_not_started(cached["status"]):
                     st.caption(team_line(cached))
+                    if not is_game_over_status(cached["status"]):
+                        _bench_panel(st.session_state.get("live_game_pk"))
                 if not has_live_state(cached["status"]):
                     st.caption(_["apply_none"])
                 elif st.button(_["apply"], key="apply_live", width="stretch"):

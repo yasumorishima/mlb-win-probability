@@ -61,6 +61,7 @@ class Moment:
     cur_is_starter: bool
     bat_pitcher_is_starter: bool
     park: np.ndarray | None = None  # class factors (7), 1.0 = average
+    extra_runner: bool = True       # automatic runner in extra innings (not in the postseason)
 
 
 @dataclass
@@ -135,7 +136,7 @@ class Bench:
             dd = Y_bp if (m.bat_pitcher_is_starter and i2 <= G.STARTER_LAST) else Y_pen
             return dd[m.fld_next, st] if (i2, h2) == first_y else dd[:, st].mean(axis=0)
 
-        return G.game_wp(start_dist, m.sched)
+        return G.game_wp(start_dist, m.sched, extra_runner=m.extra_runner)
 
     def _from(self, dist, slot, transitions) -> np.ndarray:
         """Runs in the rest of the half after immediate `transitions`
