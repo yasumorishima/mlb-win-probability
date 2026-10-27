@@ -281,6 +281,8 @@ def summarize(a) -> None:
     prev = pd.concat([pd.read_parquet(a.game / f"game_{s}.parquet") for s in SCORE], ignore_index=True)
     base2 = pd.concat([pd.read_parquet(a.prev / f"game2_starter_{s}.parquet") for s in SCORE], ignore_index=True)
     m0 = prev.merge(base2.rename(columns={"wp_new": "wp_starter"}), on=["game_pk", "at_bat_index", "season"], how="left")
+    inn = pd.concat([pd.read_parquet(a.states / f"pa_{s}.parquet", columns=["game_pk", "at_bat_index", "inning"]) for s in SCORE])
+    m0 = m0.merge(inn, on=["game_pk", "at_bat_index"], how="left")
     y = m0.home_won.to_numpy(float); g = m0.game_pk.to_numpy()
     rng = np.random.default_rng(20261028)
     se = lambda p: (np.clip(p, 1e-4, 1 - 1e-4) - y) ** 2
