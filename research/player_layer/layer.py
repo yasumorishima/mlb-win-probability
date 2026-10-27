@@ -62,9 +62,12 @@ def class_tables(eng: Engine, pa_train) -> dict:
     return out
 
 
-def multipliers(B: np.ndarray, Pt: np.ndarray, D: np.ndarray, L: np.ndarray, prm=PARAMS) -> np.ndarray:
+def multipliers(B: np.ndarray, Pt: np.ndarray, D: np.ndarray, L: np.ndarray, prm=PARAMS,
+                park: np.ndarray | None = None, alpha: float = 0.5) -> np.ndarray:
     """Stage-A multipliers (variant V5) for rows of batter counts B (n x 7),
-    pitcher counts Pt (n x 7 or 1 x 7) and defense BIP counts D (n x 4)."""
+    pitcher counts Pt (n x 7 or 1 x 7) and defense BIP counts D (n x 4);
+    optional park class factors (7, 1.0 = average) applied as park ** alpha
+    (alpha 0.5 from size_context.py)."""
     m = np.ones((len(B), len(C)))
     Lc = np.concatenate([L[NB], [L[IB].sum()]])
     Lb = L[IB] / L[IB].sum()
@@ -75,6 +78,8 @@ def multipliers(B: np.ndarray, Pt: np.ndarray, D: np.ndarray, L: np.ndarray, prm
         m[:, IB] *= mc[:, 3:4]
         m[:, IB] *= R.shrunk(X[:, IB], Lb, k2) / Lb
     m[:, IB] *= R.shrunk(np.broadcast_to(D, (len(B), len(IB))), Lb, prm["kd"]) / Lb
+    if park is not None:
+        m = m * np.asarray(park)[None, :] ** alpha
     return m
 
 
