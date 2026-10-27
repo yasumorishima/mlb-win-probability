@@ -121,6 +121,8 @@ def run_season(a) -> None:
     Ftab = {k: v for k, v in zip(Fc.index, Fc.to_numpy())}
     qtab = starter_table(tr)
     d = pa[pa.season == s].copy()
+    d["bf_b"] = [bf_bucket(x) for x in d.bf_before]            # only the bucket is used: same results, fewer solves
+    d["ybf_b"] = [bf_bucket(x) for x in d.bat_pitcher_bf]
     d["abs_lineup"] = [tuple(np.roll(row, sl)) for row, sl in
                        zip(d[[f"next{k}" for k in range(9)]].to_numpy(), d.slot.to_numpy())]
     zero_bip = np.zeros(len(R.BIP)); zeros = np.zeros(len(C))
@@ -163,13 +165,13 @@ def run_season(a) -> None:
 
     out = np.empty(len(d))
     keys = ["game_pk", "inning", "half", "pitcher", "abs_lineup", "fld_lineup", "fld_next", "bat_pitcher",
-            "cur_is_starter", "bat_pitcher_is_starter", "bf_before", "bat_pitcher_bf"]
+            "cur_is_starter", "bat_pitcher_is_starter", "bf_b", "ybf_b"]
     seg = d.groupby(keys, sort=False).indices
     col = {c: d[c].to_numpy() for c in ("sidx", "slot", "inning", "diff", "scheduled_innings", "date",
                                          "bat_team", "fld_team", "home_team")}
     n_seg = 0
     for key, rows in seg.items():
-        g, inn, half, pitcher, bl, fl, fnext, bpitch, cur_st, bp_st, bf, y_bf = key
+        g, inn, half, pitcher, bl, fl, fnext, bpitch, cur_st, bp_st, bfb, ybfb = key
         r0 = rows[0]
         date, bt, ft, sched = col["date"][r0], col["bat_team"][r0], col["fld_team"][r0], int(col["scheduled_innings"][r0])
         hab = ABBR.get(int(col["home_team"][r0]))
@@ -181,12 +183,12 @@ def run_season(a) -> None:
         Y_vs_bp = Ly.run_dist(ct, other, mult(fl, bpitch, pit.get((bpitch, date), zeros), bt, g, s, date, park))
         Y_pen = Ly.run_dist(ct, other, mult(fl, None, pen_b, bt, g, s, date, park, plat=False))
         first_y = (inn, "bottom") if half == "top" else (inn + 1, "top")
-        qx = qtab[min(inn, 12), bf_bucket(bf)] if cur_st else np.zeros(13)
+        qx = qtab[min(inn, 12), bfb] if cur_st else np.zeros(13)
         y_inn = inn if half == "bottom" else inn - 1            # last inning the batting team pitched (0 = not yet)
         if not bp_st:
             qy = np.zeros(13)
         elif y_inn >= 1:
-            qy = qtab[min(y_inn, 12), bf_bucket(y_bf)]
+            qy = qtab[min(y_inn, 12), ybfb]
         else:                                                   # top of the 1st: their starter begins the 1st
             qy = qtab[1, 0].copy(); qy[1] = 1.0
 
