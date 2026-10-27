@@ -42,7 +42,7 @@ TXT = {
            "sum_note": "モデル評価＝打席の前に、その采配で采配したチームの勝率が「何もしない」よりどれだけ上がると見ていたか（ポイント）。"
                        "結果と勝率の変化は、実際に起きたこと（運を含む）。両者は別物です。"
                        "「対象外」＝前年の記録がない選手か、モデルが扱わない場面（満塁の代走など）。守備位置・休養・故障などはモデルに入っていません。",
-           "miss_btn": "🔎 モデルならここで動いた、という場面を探す（約 20 秒）",
+           "miss_btn": "🔎 モデルならここで動いた、という場面を探す（約 30 秒）",
            "miss_head": "モデルが 1 ポイント以上の上積みを見ていたのに、その種類の采配がなかった場面（大きい順）",
            "miss_none": "そのような場面はありませんでした（基準：1 ポイント以上）。",
            "miss_row": "{inn}　{team}：{opt}　{g:+.1f} ポイント",
@@ -64,7 +64,7 @@ TXT = {
            "sum_pick": "Pick a row to jump to that moment.",
            "sum_note": "Model = how many WP points the model expected the call to add for the team that made it, before the play. "
                        "Result and WP change are what happened (luck included); they are different things. 'not rated' = no previous-season record, or a situation the model does not cover (e.g. a pinch runner with the bases loaded). Positions, rest and injuries are not in the model.",
-           "miss_btn": "🔎 Find moments where the model would have moved (about 20 s)",
+           "miss_btn": "🔎 Find moments where the model would have moved (about 30 s)",
            "miss_head": "Moments where the model saw a gain of 1 point or more and no call of that kind was made (largest first)",
            "miss_none": "None (threshold: 1 point).",
            "miss_row": "{inn}  {team}: {opt}  {g:+.1f} pt",

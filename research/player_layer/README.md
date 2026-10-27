@@ -105,6 +105,47 @@ comparisons. Fielder-level OAA gave nothing measurable here; this is a
 null for this measure (previous-season OAA, starting alignment), not a
 statement that defense does not matter.
 
+## Late-inning bullpen by usage (2026-10-28, `size_pen.py`, `game_pen.py`)
+Same folds, 2022-2025, 2026 not read; compared on the same 733,260 rows with
+the second round's "starter" variant (starter-length model, pooled bullpen).
+Only the bullpen in innings 7+ changes. For each team and inning (7, 8, 9;
+10+ uses 7-9 together), who pitches is a mixture of its relievers weighted
+by their share of the team's relief plate appearances in that inning over
+the 30 days before the game (same season), without pitchers already used in
+the game (including the current one) and anyone who pitched on both
+previous days, shrunk to the pooled bullpen with weight 30 / (30 + usage
+PAs). Variant B also splits the usage by the fielding team's lead when the
+half begins (behind / tied / ahead 1-3 / ahead 4+; 20 pseudo-PAs of the
+inning share), so the half's run distribution depends on the score
+(`game_pen.py`: game.py's recursion with score-dependent distributions;
+gate: identical to game.py when they do not depend on the score, max
+difference 0). Gate for the whole script: variant N (pool weight 1)
+reproduces the "starter" predictions (max difference 1e-15, 40 games).
+
+| 733,260 PAs, 2022-2025 | Brier | vs starter (95% game bootstrap) | log loss | 0.3-0.5 bias |
+|---|---|---|---|---|
+| starter (pooled bullpen) | 0.155168 | | 0.462926 | +1.91 pt |
+| A: usage by inning | 0.153875 | −0.00129 (−0.00152 to −0.00106) | | +2.64 pt |
+| B: usage by inning and lead | **0.153533** | **−0.00163 (−0.00187 to −0.00141)** | **0.459171** | +2.68 pt |
+
+B minus starter by season: 2022 −0.00125, 2023 −0.00160, 2024 −0.00175,
+2025 −0.00194; plate appearances in innings 7+ only: −0.00083 (−0.00100 to
+−0.00065). B separates wins better but its probabilities are less extreme
+than the outcomes in the middle (0.1-0.5: predicted 2-3 points above the
+observed rate; 0.6-0.9: 0.8-1.5 below; table in
+`published/size_pen.json`), so the 0.3-0.5 band bias grows; an
+out-of-fold recalibration (as in the BLEND sizing) is the known fix and is
+not applied here. This is sizing, not a test: B is now the bullpen in the
+bench options (`bench.py` with `pen_avail_*`, usage tables
+`published/bullpen_usage_<season>.json` from `build_usage.py`, the same
+rules in `pen_usage.py`, equal to size_pen.py on 300 sampled team-days).
+In the bench, a pitching change also removes that reliever from the later
+innings (the cost of using the closer early). Pinch-hit / pinch-run options
+use the pooled bullpen for their lineup plus the mixture's difference from
+the pool measured with the current lineup; on a recorded 2025 game (108
+options, 7th inning or later) that differs from the exact mixture by at
+most 0.06 WP points (`bench_pen_check.py`).
+
 ## Next
 1. Compare with the team layer on the same rows (the team layer was
    fitted on 2021-2025, so only a 2026 comparison is fair), then freeze a
