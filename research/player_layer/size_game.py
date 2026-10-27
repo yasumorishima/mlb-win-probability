@@ -56,6 +56,7 @@ def game_context(pa: pd.DataFrame) -> pd.DataFrame:
     fld_lineup = np.zeros((n, 9), dtype=np.int64)
     fld_next = np.zeros(n, dtype=np.int64)
     bat_pitcher = np.zeros(n, dtype=np.int64)
+    bat_pitcher_bf = np.zeros(n, dtype=np.int64)
     gk = pa.game_pk.to_numpy(); bt = pa.bat_team.to_numpy(); ft = pa.fld_team.to_numpy()
     sl = pa.slot.to_numpy(); bb = pa.batter.to_numpy(); pp = pa.pitcher.to_numpy()
     done = (pa.cls.ne("OTHER") & pa.pa_complete).to_numpy()
@@ -64,7 +65,7 @@ def game_context(pa: pd.DataFrame) -> pd.DataFrame:
         g = gk[i]
         if g != cur_g:
             cur_g = g
-            lineup, nxt, lastp = {}, {}, {}
+            lineup, nxt, lastp, bfc = {}, {}, {}, {}
         b_t, f_t = bt[i], ft[i]
         if f_t not in lineup:
             lineup[f_t] = dict(first_occ.get((g, f_t), {}))
@@ -77,11 +78,14 @@ def game_context(pa: pd.DataFrame) -> pd.DataFrame:
         fld_lineup[i] = [lineup[f_t].get(k, -1) for k in range(9)]
         fld_next[i] = nxt[f_t]
         bat_pitcher[i] = lastp.get(b_t, starter.get((g, b_t), -1))
+        bat_pitcher_bf[i] = bfc.get(bat_pitcher[i], 0)      # his batters faced so far (none after this row)
         if done[i]:
             nxt[b_t] = (sl[i] + 1) % 9
+            bfc[pp[i]] = bfc.get(pp[i], 0) + 1
     pa["fld_lineup"] = [tuple(x) for x in fld_lineup]
     pa["fld_next"] = fld_next
     pa["bat_pitcher"] = bat_pitcher
+    pa["bat_pitcher_bf"] = bat_pitcher_bf
     pa["cur_is_starter"] = [p == starter.get((g, t)) for g, t, p in zip(gk, ft, pp)]
     pa["bat_pitcher_is_starter"] = [p == starter.get((g, t)) for g, t, p in zip(gk, bt, bat_pitcher)]
     pa["is_relief"] = ~pa.cur_is_starter
