@@ -167,3 +167,31 @@ def bench_options(feed: dict, max_pinch: int = MAX_PINCH, max_relief: int = MAX_
     return {"offense": offense, "defense": defense, "batter": nm.get(extra["batter"], ""),
             "pitcher": nm.get(m.pitcher, ""), "records_through": extra["records_through"],
             "state": extra["state"]}
+
+
+def matchups(feed: dict, n_next: int = 3) -> dict | None:
+    """The current batter and the next `n_next` against the current pitcher:
+    the plate-appearance outcome probabilities of the player layer in this
+    base-out state (handedness included)."""
+    got = moment_from_feed(feed)
+    if got is None:
+        return None
+    m, data, extra = got
+    from wp_engine import STATES, _state
+    ct = _snapshot()["_ct"][m.half]
+    si = STATES.index(_state(m.outs, *m.bases))
+    ids = [m.lineup[(m.slot + k) % 9] for k in range(n_next + 1)]
+    M = B._mult(data, ids, m.pitcher, B._counts(data.pit, m.pitcher), data.def_fld, m.park)
+    P = ct["P"][si]
+    po = P[len(B.C)]
+    q = P[None, :len(B.C)] * M
+    q = q / q.sum(axis=1, keepdims=True)
+    C = B.C
+    nm = extra["names"]
+    rows = []
+    for k, (pid, p) in enumerate(zip(ids, q)):
+        rows.append({"order": k, "id": pid, "name": nm.get(pid, str(pid)),
+                     "p_on_base": float(p[C.index("BB")] + p[C.index("1B")] + p[C.index("2B")] + p[C.index("3B")] + p[C.index("HR")]),
+                     "p_k": float(p[C.index("K")]), "p_xbh": float(p[C.index("2B")] + p[C.index("3B")] + p[C.index("HR")]),
+                     "p_hr": float(p[C.index("HR")])})
+    return {"pitcher": nm.get(m.pitcher, str(m.pitcher)), "rows": rows, "p_other": float(po)}

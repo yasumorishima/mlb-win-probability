@@ -49,7 +49,7 @@ st.set_page_config(
 # ============================================================
 
 lang = st.sidebar.radio("Language / 言語", ["EN", "JA"], horizontal=True)
-MODES = ["⚾ WP Calculator", "🎬 Replay Mode"]
+MODES = ["⚾ WP Calculator", "🎬 Replay Mode", "📋 Bench"]
 mode = st.sidebar.radio("Mode", MODES, horizontal=True, label_visibility="collapsed",
                         key="mode")
 
@@ -464,6 +464,16 @@ st.markdown("""
 st.markdown(f"# {_['title']}")
 st.markdown(f"*{_['subtitle']}*")
 st.markdown("---")
+
+
+# ============================================================
+# Bench screen (bench_screen.py): one page that follows a live game
+# ============================================================
+
+if mode == "📋 Bench":
+    import bench_screen
+    bench_screen.render(lang)
+    st.stop()
 
 
 # ============================================================
