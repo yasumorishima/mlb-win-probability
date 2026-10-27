@@ -30,12 +30,12 @@ SUB_TYPES = {"offensive_substitution", "defensive_substitution", "defensive_swit
 
 def _subs(play: dict) -> list[dict]:
     out = []
-    for e in play.get("playEvents", []):
+    for i, e in enumerate(play.get("playEvents", [])):
         d = e.get("details", {})
         if d.get("eventType") in SUB_TYPES | {"pitching_substitution"}:
             out.append({"type": d.get("eventType"), "player": (e.get("player") or {}).get("id"),
                         "order": e.get("battingOrder"), "pos": (e.get("position") or {}).get("abbreviation"),
-                        "text": d.get("description", "")})
+                        "text": d.get("description", ""), "idx": i})
     return out
 
 
@@ -56,7 +56,7 @@ def timeline(feed: dict) -> list[dict]:
         decisions = []
         for sb in _subs(p):
             decisions.append({"type": {"offensive_substitution": "pinch", "pitching_substitution": "pitch_change"}.get(sb["type"], "defense"),
-                              "player": sb["player"], "pos": sb["pos"], "text": sb["text"]})
+                              "player": sb["player"], "pos": sb["pos"], "text": sb["text"], "idx": sb["idx"]})
         for d in events:
             et = d.get("eventType") or ""
             if et.startswith(("stolen_base", "caught_stealing")):
@@ -70,8 +70,11 @@ def timeline(feed: dict) -> list[dict]:
     return out
 
 
-def moment_at(feed: dict, k: int, snapshot_path: str | None = "auto"):
-    """(Moment, Data, extra) just before plate appearance k, or None."""
+def moment_at(feed: dict, k: int, snapshot_path: str | None = "auto", upto_event: int | None = None):
+    """(Moment, Data, extra) just before plate appearance k, or None.
+    upto_event: also apply the substitutions of play k recorded before that
+    event index (the moment a later call in the same plate appearance was
+    made, e.g. a pinch hitter sent up after a pitching change)."""
     raw = [p for p in feed.get("liveData", {}).get("plays", {}).get("allPlays", []) if p.get("about", {}).get("isComplete")]
     states = parse_game_plays(feed)
     if not 0 <= k < len(raw):
@@ -110,6 +113,20 @@ def moment_at(feed: dict, k: int, snapshot_path: str | None = "auto"):
             n_pa[bat] += 1
     p = raw[k]
     bat, fld = _side(p)
+    if upto_event is not None:
+        for sb in _subs(p):
+            if sb["idx"] >= upto_event or not sb["player"]:
+                continue
+            if sb["type"] == "pitching_substitution":
+                if not pitchers[fld]:
+                    first = next((q for q in raw if _side(q)[1] == fld), None)
+                    pitchers[fld].append(int(first["matchup"]["pitcher"]["id"]))
+                pitchers[fld].append(int(sb["player"]))
+                continue
+            side = bat if sb["type"] == "offensive_substitution" else fld
+            if sb["order"]:
+                lineup[side][int(str(sb["order"])[0]) - 1] = int(sb["player"])
+            used[side].add(int(sb["player"]))
     if any(x is None for x in lineup[bat] + lineup[fld]):
         return None
     slot, fld_next = n_pa[bat] % 9, n_pa[fld] % 9
@@ -124,13 +141,20 @@ def moment_at(feed: dict, k: int, snapshot_path: str | None = "auto"):
             return None
         pitchers[bat].append(int(first["matchup"]["pitcher"]["id"]))
 
+    people = gd.get("players", {})
+
+    def is_pitcher(q) -> bool:
+        """A pitcher by trade (primary position P or two-way), not a position
+        player who pitched later in the game (the boxscore position is the
+        one at the end of the game)."""
+        pp = (people.get(f"ID{q['person']['id']}", {}).get("primaryPosition") or {}).get("abbreviation")
+        if pp:
+            return pp in ("P", "TWP")
+        return (q.get("position") or {}).get("abbreviation") == "P"
+
     def roster(side, want_pitchers):
-        out = []
-        for q in box.get(side, {}).get("players", {}).values():
-            is_p = (q.get("position") or {}).get("abbreviation") == "P"
-            if is_p == want_pitchers:
-                out.append(int(q["person"]["id"]))
-        return out
+        return [int(q["person"]["id"]) for q in box.get(side, {}).get("players", {}).values()
+                if is_pitcher(q) == want_pitchers]
 
     bench = [x for x in roster(bat, False) if x not in used[bat]]
     pen_fld = [x for x in roster(fld, True) if x not in pitchers[fld]]
