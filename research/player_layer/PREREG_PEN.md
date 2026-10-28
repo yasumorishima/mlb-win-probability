@@ -1,7 +1,9 @@
 # Pre-registration: PEN_RECAL (player layer + late-inning bullpen by usage, recalibrated) on 2026
 
-Status: DRAFT (becomes FROZEN in the commit that sets this line; nothing below changes after that,
-except in a dated AMENDMENTS section written before the score step is run).
+Status: FROZEN (2026-10-28, cloud). Nothing below changes after the commit that set this line, except
+in a dated AMENDMENTS section written before the score step is run. Independent review before the
+freeze (read-only subagent, no 2026 outcome read): blocking points fixed — 2026 predictions pinned
+and recomputed at scoring, frozen list filled, disclosures (b)-(d) added, park file md5 checked.
 
 ## Why
 The headline win probability of the app is the team layer (TEAM, `research/wp_layer`). The player
@@ -85,3 +87,35 @@ Outputs `published/pen_2026.parquet`, `published/results_pen_2026.json`, `RESULT
 - H1 not supported → the headline stays TEAM; PEN_RECAL's numbers are published either way.
 
 ## Frozen files (md5)
+0d61f77c584cc7ef414c9c198aa9e7ec  research/player_layer/test_pen_2026.py
+d2170512c0acc37b918cdb4ce4b59d25  research/player_layer/size_pen.py
+6883dd4c9f13b64f0073e06923595312  research/player_layer/game.py
+49a5462584d4a3b546f14dd01d996c47  research/player_layer/game_pen.py
+24cd633fdb951a6a5a195cf7f17ec149  research/player_layer/layer.py
+6ec9535345c1098f069babaf15160269  research/player_layer/pa_rates.py
+033bb61b84531f594545611cc45d24a9  research/player_layer/size_context.py
+d9a6d77695ed33e4f0bf41ec9d945ccf  research/player_layer/size_game.py
+1a5097807220a8b0186ebe85252694ca  research/player_layer/size_game2.py
+99446952547af94e88220d61a0acf272  research/player_layer/size_hand.py
+14e0b9a891fb36a6b7e6ed61f194ea84  research/player_layer/rates_v2.py
+4681783920315619f4a4b58abffe712d  research/player_layer/size_pa.py
+ca649a877f4e83d894970372fd2c596a  research/player_layer/size_runs.py
+a71518eba9ad596861857508619bc270  research/player_layer/size_stack.py
+12972ac8bb23a2dc8c152c07cbfd7a56  wp_engine.py
+b979748de5cd4e160981485454a08dd7  research/wp_layer/layer_features.py
+271cd82d1561a001920fa86d89f4f27f  research/player_layer/published/pen_recal_coef.json
+17e139c538b2122272345dc81a69a1c9  research/player_layer/published/size_stack_pen.json
+8e97bcc37f14d66f9cf165bf69e28746  research/player_layer/published/size_pen.json
+d0329712d57441fb7e73f6bfd03513ac  research/player_layer/published/penB_2026_part0.parquet
+fe6e4b7c0cfcbbbeab875c1f52e8c6f4  research/player_layer/published/penB_2026_part1.parquet
+b281a3c1da82f56c7fbbf4b43e09d1fd  research/player_layer/published/penB_2026_part2.parquet
+d255c1625a9380dca907da7e65d2d672  research/player_layer/published/penB_2026_part3.parquet
+fb899b2b625b61b6220dc6389e528c57  research/player_layer/published/pred_2026_part0.parquet
+370b161ae892e81b74f64630f906e575  research/player_layer/published/pred_2026_part1.parquet
+9c0e9909b04f833e70b9bbfcd9e0e265  research/player_layer/published/pred_2026_part2.parquet
+c65338b792b53f250f54ba7c39f9eba6  research/player_layer/published/pred_2026_part3.parquet
+64f6c3f0cd90b5d6adcbefd7abb843ee  research/player_layer/published/blend_2026.parquet
+c9e35870ab157190d2d81b1f26b23b87  research/wp_layer/published/pred_2026.parquet
+
+## AMENDMENTS
+(none)
