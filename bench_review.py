@@ -12,7 +12,9 @@ and how the model rated it among the options, and what happened next.
 from __future__ import annotations
 
 import html
+import json
 from datetime import date, timedelta
+from pathlib import Path
 
 import streamlit as st
 
@@ -50,6 +52,7 @@ TXT = {
            "miss_row": "{inn}　{team}：{opt}　{g:+.1f} ポイント",
            "miss_note": "継投は 7 回以降のみ（それより前は大きく出すぎるため）。盗塁は「走れ」の判定のときだけ。",
            "pen_note": "選手・終盤の継投の使い方込みの勝率（2026 年で事前登録して検証済み）",
+           "note_head": "📝 試合の解説", "note_cap": "Claude（Sonnet 5.5）が、この画面と同じ勝率と試合記録だけを渡されて事前に書いた文章です。数字とスコアは渡した値と一致するものだけを残しています。",
            "after_sub": "この打席で先にあった交代のあとの状況で評価",
            "usage": "普段の起用パターンなら {p}（モデルの順位 {r}/{n}）", "usage_same": "普段の起用パターンどおり（モデルの順位 {r}/{n}）",
            "usage_note": "起用パターン＝そのチームが直近 30 日、この回・この点差でいちばん多く使った投手（使える投手のうち）。2026 年の検証では、監督の選択との一致はモデルの最善候補より高めでした（28.7% と 20.1%）。",
@@ -79,6 +82,7 @@ TXT = {
            "miss_row": "{inn}  {team}: {opt}  {g:+.1f} pt",
            "miss_note": "Pitching changes from the 7th inning only (earlier ones are overstated). Steals only when the call is 'go'.",
            "pen_note": "WP with players and late-inning bullpen usage (pre-registered, checked on 2026)",
+           "note_head": "📝 Game note (Japanese)", "note_cap": "Written in advance by Claude (Sonnet 5.5) from the same win probabilities and play log as this screen; only notes whose numbers and scores match those inputs are kept.",
            "after_sub": "rated after the earlier substitution in this plate appearance",
            "usage": "Usage pattern: {p} (model rank {r}/{n})", "usage_same": "Matches the usage pattern (model rank {r}/{n})",
            "usage_note": "Usage pick = the available reliever the team used most over the last 30 days in this inning and score state. In the 2026 check it matched managers more often than the model's best (28.7% vs 20.1%).",
@@ -88,6 +92,27 @@ TXT = {
 }
 DEC_JA = {"pinch": "代打・代走", "pitch_change": "継投", "steal": "盗塁", "bunt": "バント", "intentional_walk": "敬遠",
           "defense": "守備交代"}
+
+
+NOTES_DIR = Path(__file__).resolve().parent / "research/game_notes/published"
+
+
+@st.cache_data(show_spinner=False)
+def _notes(season: int) -> dict:
+    p = NOTES_DIR / f"notes_{season}.json"
+    try:
+        return json.loads(p.read_text()).get("notes", {}) if p.exists() else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def game_note(pk: int, game_date: str | None) -> str | None:
+    """The pre-generated note for a finished game, or None."""
+    try:
+        season = int(str(game_date)[:4])
+    except (TypeError, ValueError):
+        return None
+    return _notes(season).get(str(int(pk)))
 
 
 def _label(t: dict, lang: str) -> str:
@@ -348,6 +373,11 @@ def render(lang: str) -> None:
     vkey = f"review_view_{lang}"
     if "review_view_next" in st.session_state:          # a jump from the summary back to the moment view
         st.session_state[vkey] = x["views"][st.session_state.pop("review_view_next")]
+    note = game_note(pk, tl[0].get("game_date"))
+    if note:
+        with st.expander(x["note_head"], expanded=True):
+            st.markdown(html.escape(note))
+            st.caption(x["note_cap"])
     view = st.radio(x["view"], x["views"], horizontal=True, key=vkey, label_visibility="collapsed")
     if view == x["views"][1]:
         _summary(lang, pk, feed, x)
