@@ -147,7 +147,7 @@ options, 7th inning or later) that differs from the exact mixture by at
 most 0.06 WP points (`bench_pen_check.py`).
 
 ## Relievers by usage from the 4th inning (sizing 2022-2025, 2026 not read)
-`size_pen.py --first-inning 4`: the usage mixture (same rules as variant B: share of the team's relief
+`size_pen_x.py --first-inning 4`: the usage mixture (same rules as variant B: share of the team's relief
 plate appearances in that inning and lead state over 30 days, pool weight from the usage of innings
 4-6 for innings 4-6) replaces the pooled bullpen from the 4th inning instead of the 7th. Both layers
 recalibrated out of fold the same way as PEN_RECAL (`size_vs_pen.py`, `published/size_vs_pen_f4.json`).
@@ -168,7 +168,7 @@ PA level (`size_tto.py`, `published/size_tto.json`): class factors by the starte
 probabilities: log loss −0.00071 (95% −0.00080 to −0.00061), every season; largest the third
 time through (−0.00270; strikeouts about 13% fewer, extra-base hits more).
 
-WP level (`size_pen.py --tto`, recalibrated out of fold as PEN_RECAL, `size_vs_pen.py`; gate: without
+WP level (`size_pen_x.py --tto`, recalibrated out of fold as PEN_RECAL, `size_vs_pen.py`; gate: without
 `--tto` the 40-game file of 2022 is reproduced, 1.1e-16):
 
 | | Brier (recalibrated) | minus PEN_RECAL (95%) | by season 2022-2025 |
@@ -181,6 +181,23 @@ Both are **worse** in every season. The PA-level gain does not carry over to the
 likely reason is selection: a starter who is still pitching later in the game is having a good day,
 which the starter-length model already reflects, so a penalty for his later times through overstates
 it. Not taken further (PEN_RECAL stays).
+
+## Starter length by pitch count (sizing 2022-2025, 2026 not read)
+`size_pen_x.py --pc-edges 0,30,45,60,75,85,95,105,1000` (`starter_pc.py`): the chance that the starter begins
+a later inning is looked up by his pitches thrown so far (8 buckets, edges fixed before the run) instead of
+batters faced (5 buckets); everything else as PEN. Pitches come from `pitch_<season>.parquet` (all pitches
+of a plate appearance are credited to the pitcher on record). Gates: the table with batters faced in place
+of pitches equals `size_game2.starter_table` (diff 0); without the option `size_pen_x.py` equals the frozen
+`size_pen.py` on the 40-game file of 2022 (diff 0). Recalibrated out of fold as PEN_RECAL (`size_vs_pen.py`,
+`published/size_vs_pen_pc.json`):
+
+| | Brier (recalibrated) | minus PEN_RECAL (95%) | by season 2022-2025 |
+|---|---|---|---|
+| PEN_RECAL (batters faced) | 0.153362 | | |
+| pitches thrown | 0.153347 | -0.000015 (-0.000033 to +0.000004) | -0.000017, +0.000009, -0.000024, -0.000028 |
+
+Not better in every season (2023 worse) and the interval includes 0: no gain at this size, not taken
+further (PEN_RECAL stays). Band 0.3-0.5 unchanged (+0.55 pt).
 
 ## Next
 1. Compare with the team layer on the same rows (the team layer was
