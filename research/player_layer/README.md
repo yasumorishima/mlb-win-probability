@@ -147,7 +147,7 @@ options, 7th inning or later) that differs from the exact mixture by at
 most 0.06 WP points (`bench_pen_check.py`).
 
 ## Relievers by usage from the 4th inning (sizing 2022-2025, 2026 not read)
-`size_pen.py --first-inning 4`: the usage mixture (same rules as variant B: share of the team's relief
+`size_pen_x.py --first-inning 4`: the usage mixture (same rules as variant B: share of the team's relief
 plate appearances in that inning and lead state over 30 days, pool weight from the usage of innings
 4-6 for innings 4-6) replaces the pooled bullpen from the 4th inning instead of the 7th. Both layers
 recalibrated out of fold the same way as PEN_RECAL (`size_vs_pen.py`, `published/size_vs_pen_f4.json`).
@@ -168,7 +168,7 @@ PA level (`size_tto.py`, `published/size_tto.json`): class factors by the starte
 probabilities: log loss −0.00071 (95% −0.00080 to −0.00061), every season; largest the third
 time through (−0.00270; strikeouts about 13% fewer, extra-base hits more).
 
-WP level (`size_pen.py --tto`, recalibrated out of fold as PEN_RECAL, `size_vs_pen.py`; gate: without
+WP level (`size_pen_x.py --tto`, recalibrated out of fold as PEN_RECAL, `size_vs_pen.py`; gate: without
 `--tto` the 40-game file of 2022 is reproduced, 1.1e-16):
 
 | | Brier (recalibrated) | minus PEN_RECAL (95%) | by season 2022-2025 |
