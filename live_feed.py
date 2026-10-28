@@ -70,6 +70,39 @@ def get_todays_games(date: str | None = None) -> list[dict]:
     return games
 
 
+def get_teams() -> list[dict]:
+    """MLB teams: [{id, abbr, name}] sorted by name ([] on error)."""
+    data = _fetch(f"{_BASE}/v1/teams?sportId=1")
+    if data is None:
+        return []
+    out = [{"id": t["id"], "abbr": t.get("abbreviation", ""), "name": t.get("name", "")}
+           for t in data.get("teams", []) if "id" in t]
+    return sorted(out, key=lambda t: t["name"])
+
+
+def get_team_games(team_id: int, start: str, end: str) -> list[dict]:
+    """A team's regular-season and postseason games between two dates (YYYY-MM-DD),
+    newest first: [{gamePk, date, home, away, home_id, away_id, home_score,
+    away_score, status, game_type}] ([] on error)."""
+    data = _fetch(f"{_BASE}/v1/schedule?sportId=1&teamId={int(team_id)}&startDate={start}&endDate={end}"
+                  f"&gameType=R,F,D,L,W")
+    if data is None:
+        return []
+    out = []
+    for d in data.get("dates", []):
+        for g in d.get("games", []):
+            if "gamePk" not in g:
+                continue
+            t = g.get("teams", {})
+            h, a = t.get("home", {}), t.get("away", {})
+            out.append({"gamePk": g["gamePk"], "date": g.get("officialDate") or d.get("date", ""),
+                        "home": h.get("team", {}).get("name", "Home"), "away": a.get("team", {}).get("name", "Away"),
+                        "home_id": h.get("team", {}).get("id"), "away_id": a.get("team", {}).get("id"),
+                        "home_score": h.get("score"), "away_score": a.get("score"),
+                        "status": g.get("status", {}).get("detailedState", "Unknown"), "game_type": g.get("gameType", "")})
+    return sorted(out, key=lambda g: (g["date"], g["gamePk"]), reverse=True)
+
+
 GAME_OVER_PREFIXES = ("Final", "Game Over", "Completed Early")
 NO_STATE_PREFIXES = GAME_OVER_PREFIXES + ("Postponed", "Cancelled", "Suspended")
 

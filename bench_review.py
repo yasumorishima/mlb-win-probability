@@ -22,6 +22,7 @@ import bench_screen
 import bench_viz
 import pen_wp
 from analysis import leverage_index
+import live_feed
 from live_feed import get_todays_games
 
 TXT = {
@@ -48,7 +49,10 @@ TXT = {
            "miss_none": "そのような場面はありませんでした（基準：1 ポイント以上）。",
            "miss_row": "{inn}　{team}：{opt}　{g:+.1f} ポイント",
            "miss_note": "継投は 7 回以降のみ（それより前は大きく出すぎるため）。盗塁は「走れ」の判定のときだけ。",
-           "pen_note": "選手・終盤の継投の使い方込みの勝率（2026 年で事前登録して検証済み）"},
+           "pen_note": "選手・終盤の継投の使い方込みの勝率（2026 年で事前登録して検証済み）",
+           "find": "探し方", "finds": ["📅 日付から", "⚾ チームから"], "team": "チーム", "season": "年",
+           "no_team_games": "この年の終わった試合が見つかりません。", "win": "勝", "loss": "負",
+           "keys": "山場（勝率が大きく動いた打席。押すとその局面へ）"},
     "EN": {"date": "Date", "game": "Game", "none": "No finished games on this date.", "moment": "Moment",
            "prev": "◀ Prev", "next": "Next ▶", "hot": "Biggest moment", "decisions": "Bench decisions", "pick": "(pick)",
            "actual": "What happened", "result": "Result", "swing": "{team} WP {a:.0%} → {b:.0%} ({d:+.0f})",
@@ -71,7 +75,10 @@ TXT = {
            "miss_none": "None (threshold: 1 point).",
            "miss_row": "{inn}  {team}: {opt}  {g:+.1f} pt",
            "miss_note": "Pitching changes from the 7th inning only (earlier ones are overstated). Steals only when the call is 'go'.",
-           "pen_note": "WP with players and late-inning bullpen usage (pre-registered, checked on 2026)"},
+           "pen_note": "WP with players and late-inning bullpen usage (pre-registered, checked on 2026)",
+           "find": "Find by", "finds": ["📅 Date", "⚾ Team"], "team": "Team", "season": "Season",
+           "no_team_games": "No finished games found for this season.", "win": "W", "loss": "L",
+           "keys": "Key moments (biggest win-probability swings; tap to jump)"},
 }
 DEC_JA = {"pinch": "代打・代走", "pitch_change": "継投", "steal": "盗塁", "bunt": "バント", "intentional_walk": "敬遠",
           "defense": "守備交代"}
@@ -93,6 +100,39 @@ def _feed(pk: int) -> dict | None:
 @st.cache_data(show_spinner=False, max_entries=16)
 def _games_on(day: str) -> list[dict]:
     return [g for g in get_todays_games(day) if g.get("status") in ("Final", "Game Over", "Completed Early")]
+
+
+@st.cache_data(show_spinner=False, ttl=86400)
+def _teams() -> list[dict]:
+    return live_feed.get_teams()
+
+
+@st.cache_data(show_spinner=False, max_entries=32, ttl=3600)
+def _team_games(team_id: int, season: int) -> list[dict]:
+    games = live_feed.get_team_games(team_id, f"{season}-02-15", f"{season}-11-15")
+    return [g for g in games if str(g.get("status", "")).startswith(("Final", "Game Over", "Completed Early"))]
+
+
+def _team_label(g: dict, team_id: int, abbr: dict, x: dict) -> str:
+    home = g["home_id"] == team_id
+    opp = abbr.get(g["away_id"] if home else g["home_id"], g["away"] if home else g["home"])
+    own, oth = (g["home_score"], g["away_score"]) if home else (g["away_score"], g["home_score"])
+    res = ""
+    if own is not None and oth is not None:
+        res = f"  {own}-{oth} {x['win'] if own > oth else x['loss']}"
+    return f"{g['date'][5:].replace('-', '/')} {'vs' if home else '@'} {opp}{res}"
+
+
+def key_moments(tl: list[dict], series: list[dict], n: int = 5) -> list[tuple[int, float]]:
+    """The n plate appearances with the largest win-probability swing, in game
+    order: [(k, swing in points for the batting team)]."""
+    sw = []
+    for k, t in enumerate(tl):
+        if k + 1 < len(series):
+            d = 100 * (series[k + 1]["wp"] - series[k]["wp"])
+            sw.append((k, d if t["top_bottom"] == "bottom" else -d))
+    top = sorted(sw, key=lambda z: -abs(z[1]))[:n]
+    return sorted(top)
 
 
 def _moment(pk: int, k: int):
@@ -227,17 +267,38 @@ def _summary(lang: str, pk: int, feed: dict, x: dict) -> None:
 
 def render(lang: str) -> None:
     x = TXT[lang]
-    c1, c2 = st.columns([1, 3])
-    with c1:
-        day = st.date_input(x["date"], value=st.session_state.get("review_day", date(2026, 9, 27)),
-                            max_value=date.today() - timedelta(days=1), key="review_day")
-    games = _games_on(day.isoformat())
-    if not games:
-        st.info(x["none"])
-        return
-    with c2:
-        pk = st.selectbox(x["game"], [g["gamePk"] for g in games], key="review_game",
-                          format_func=lambda p: next(f"{g['away_team']} @ {g['home_team']}" for g in games if g["gamePk"] == p))
+    how = st.radio(x["find"], x["finds"], horizontal=True, key=f"review_find_{lang}")
+    if how == x["finds"][0]:
+        c1, c2 = st.columns([1, 3])
+        with c1:
+            day = st.date_input(x["date"], value=st.session_state.get("review_day", date(2026, 9, 27)),
+                                max_value=date.today() - timedelta(days=1), key="review_day")
+        games = _games_on(day.isoformat())
+        if not games:
+            st.info(x["none"])
+            return
+        with c2:
+            pk = st.selectbox(x["game"], [g["gamePk"] for g in games], key="review_game",
+                              format_func=lambda p: next(f"{g['away_team']} @ {g['home_team']}" for g in games if g["gamePk"] == p))
+    else:
+        teams = _teams()
+        if not teams:
+            st.info(x["none"])
+            return
+        abbr = {t["id"]: t["abbr"] for t in teams}
+        c1, c2, c3 = st.columns([2, 1, 3])
+        with c1:
+            tid = st.selectbox(x["team"], [t["id"] for t in teams], key="review_team",
+                               format_func=lambda i: next(t["name"] for t in teams if t["id"] == i))
+        with c2:
+            season = st.selectbox(x["season"], [2026, 2025, 2024, 2023, 2022], key="review_season")
+        tg = _team_games(tid, season)
+        if not tg:
+            st.info(x["no_team_games"])
+            return
+        with c3:
+            pk = st.selectbox(x["game"], [g["gamePk"] for g in tg], key=f"review_tgame_{tid}_{season}",
+                              format_func=lambda p: next(_team_label(g, tid, abbr, x) for g in tg if g["gamePk"] == p))
     with st.spinner(x["loading"]):
         feed = _feed(pk)
     if not feed:
@@ -282,6 +343,16 @@ def render(lang: str) -> None:
                             format_func=lambda j: x["pick"] if j is None else
                             _label(tl[j], lang) + "  ・" + "／".join(sorted({DEC_JA.get(d["type"], d["type"]) if lang == "JA" else d["type"]
                                                                            for d in tl[j]["decisions"] if d["type"] != "defense"})))
+    km = key_moments(tl, series)
+    if km:
+        st.caption(x["keys"])
+        cols = st.columns(len(km))
+        for (kk, dd), col in zip(km, cols):
+            t_ = tl[kk]
+            inn = f"{t_['inning']}{'表' if t_['top_bottom'] == 'top' else '裏'}" if lang == "JA" else \
+                f"{'T' if t_['top_bottom'] == 'top' else 'B'}{t_['inning']}"
+            if col.button(f"{inn} {dd:+.0f}", key=f"review_km_{pk}_{kk}", help=t_.get("description", ""), width="stretch"):
+                k = kk
     if pick is not None and st.session_state.get("review_last_pick") != pick:
         st.session_state["review_last_pick"] = pick
         k = pick
