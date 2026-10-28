@@ -148,6 +148,7 @@ assert not at.exception, at.exception
 md = " ".join(m.value for m in at.markdown)
 assert "Home：采配" in md and "Away：采配" in md, md[-800:]
 df = at.dataframe[0].value
+assert "起用パターン" in df.columns, list(df.columns)
 assert len(df) == len([d for t in tl for d in t["decisions"] if d["type"] != "defense"]), df
 assert any("代打" in str(v) or "代走" in str(v) for v in df[df.columns[2]])
 at.button(key="review_miss_777").click().run()

@@ -38,7 +38,7 @@ TXT = {
            "views": ["⚾ 局面", "📝 試合のまとめ"], "view": "表示",
            "not_rated2": "対象外",
            "sum_head": "{team}：采配 {n} 回（評価できたもの {r} 回）　モデルの最善と一致 {a} 回　プラス評価 {p} 回",
-           "sum_cols": ["回", "チーム", "采配", "モデル評価", "最善候補", "最善との差", "結果", "勝率の変化", "記録"],
+           "sum_cols": ["回", "チーム", "采配", "モデル評価", "最善候補", "最善との差", "起用パターン", "結果", "勝率の変化", "記録"],
            "sum_none": "この試合には代打・代走・継投・盗塁・バント・敬遠の記録がありません。",
            "sum_pick": "表の行を選ぶと、その局面に移ります。",
            "sum_note": "モデル評価＝打席の前に、その采配で采配したチームの勝率が「何もしない」よりどれだけ上がると見ていたか（ポイント）。"
@@ -50,6 +50,8 @@ TXT = {
            "miss_row": "{inn}　{team}：{opt}　{g:+.1f} ポイント",
            "miss_note": "継投は 7 回以降のみ（それより前は大きく出すぎるため）。盗塁は「走れ」の判定のときだけ。",
            "pen_note": "選手・終盤の継投の使い方込みの勝率（2026 年で事前登録して検証済み）",
+           "usage": "普段の起用パターンなら {p}（モデルの順位 {r}/{n}）", "usage_same": "普段の起用パターンどおり（モデルの順位 {r}/{n}）",
+           "usage_note": "起用パターン＝そのチームが直近 30 日、この回・この点差でいちばん多く使った投手（使える投手のうち）。2026 年の検証では、監督の選択との一致はモデルの最善候補より高めでした（28.7% と 20.1%）。",
            "find": "探し方", "finds": ["📅 日付から", "⚾ チームから"], "team": "チーム", "season": "年",
            "no_team_games": "この年の終わった試合が見つかりません。", "win": "勝", "loss": "負",
            "keys": "山場（勝率が大きく動いた打席。押すとその局面へ）"},
@@ -65,7 +67,7 @@ TXT = {
            "views": ["⚾ Moment", "📝 Game summary"], "view": "View",
            "not_rated2": "not rated",
            "sum_head": "{team}: {n} calls ({r} rated), matched the model's best {a}, positive {p}",
-           "sum_cols": ["Inning", "Team", "Call", "Model", "Best candidate", "Gap to best", "Result", "WP change", "Play-by-play"],
+           "sum_cols": ["Inning", "Team", "Call", "Model", "Best candidate", "Gap to best", "Usage pick", "Result", "WP change", "Play-by-play"],
            "sum_none": "No pinch hitters, pinch runners, pitching changes, steals, bunts or intentional walks in this game.",
            "sum_pick": "Pick a row to jump to that moment.",
            "sum_note": "Model = how many WP points the model expected the call to add for the team that made it, before the play. "
@@ -76,6 +78,8 @@ TXT = {
            "miss_row": "{inn}  {team}: {opt}  {g:+.1f} pt",
            "miss_note": "Pitching changes from the 7th inning only (earlier ones are overstated). Steals only when the call is 'go'.",
            "pen_note": "WP with players and late-inning bullpen usage (pre-registered, checked on 2026)",
+           "usage": "Usage pattern: {p} (model rank {r}/{n})", "usage_same": "Matches the usage pattern (model rank {r}/{n})",
+           "usage_note": "Usage pick = the available reliever the team used most over the last 30 days in this inning and score state. In the 2026 check it matched managers more often than the model's best (28.7% vs 20.1%).",
            "find": "Find by", "finds": ["📅 Date", "⚾ Team"], "team": "Team", "season": "Season",
            "no_team_games": "No finished games found for this season.", "win": "W", "loss": "L",
            "keys": "Key moments (biggest win-probability swings; tap to jump)"},
@@ -161,6 +165,15 @@ def _rate(dec: dict, opts: dict, lang: str, x: dict) -> str:
     return x["rated"].format(d=r["gain"], n=r["n"], r=r["rank"])
 
 
+def _short(o: dict, ja: bool) -> str:
+    """A candidate's name without the option word (継投 / new P)."""
+    lab = o.get("label_ja" if ja else "label_en", "")
+    for pre in ("継投 ", "代打 ", "代走 ", "new P ", "PH ", "PR "):
+        if lab.startswith(pre):
+            return lab[len(pre):]
+    return lab
+
+
 def _inn(t: dict, lang: str) -> str:
     if lang == "JA":
         return f"{t['inning']}回{'表' if t['top_bottom'] == 'top' else '裏'}"
@@ -236,9 +249,13 @@ def _summary(lang: str, pk: int, feed: dict, x: dict) -> None:
         rt_me = (rt["me_ja"] if ja else rt["me_en"]) if rt and r["type"] in ("pinch", "pitch_change") else kind_name(r["type"])
         if not rt and r["type"] in ("pinch", "pitch_change"):
             rt_me = kind_name(r["type"])
+        up = r.get("usage")
+        upl = ""
+        if up:
+            upl = ("采配と同じ" if ja else "same") if up["player"] == r.get("player") else _short(up["option"], ja)
         table.append({c[0]: _inn(r, lang), c[1]: team[r["side"]], c[2]: rt_me,
-                      c[3]: model, c[4]: best, c[5]: gap, c[6]: r["event"],
-                      c[7]: "" if r["swing"] is None else f"{r['swing']:+.1f}", c[8]: r["text"]})
+                      c[3]: model, c[4]: best, c[5]: gap, c[6]: upl, c[7]: r["event"],
+                      c[8]: "" if r["swing"] is None else f"{r['swing']:+.1f}", c[9]: r["text"]})
     ev = st.dataframe(table, hide_index=True, width="stretch", on_select="rerun", selection_mode="single-row",
                       key=f"review_table_{pk}")
     st.caption(x["sum_pick"] + " " + x["sum_note"])
@@ -380,6 +397,10 @@ def render(lang: str) -> None:
         if d["type"] == "defense":
             continue
         rate = _rate(d, opts, lang, x) if opts else ""
+        up = bench_replay.usage_pick(t, tl, d, opts) if d["type"] == "pitch_change" else None
+        if up:
+            rate += "　／　" + (x["usage_same"].format(r=up["rank"], n=up["n"]) if up["player"] == d.get("player")
+                               else x["usage"].format(p=_short(up["option"], lang == "JA"), r=up["rank"], n=up["n"]))
         lines.append(f"<li><b>{html.escape(DEC_JA.get(d['type'], d['type']) if lang == 'JA' else d['type'])}</b> — "
                      f"{html.escape(d.get('text', ''))}<br><span style='color:#c3c2b7'>{html.escape(rate)}</span></li>")
     swing = ""
@@ -405,4 +426,5 @@ def render(lang: str) -> None:
                 st.rerun()
     st.caption(x["tap"])
     if opts:
-        st.caption(x["records"].format(d=opts["records_through"]) + " " + x["limits"])
+        st.caption(x["records"].format(d=opts["records_through"]) + " " + x["limits"]
+                   + (" " + x["usage_note"] if any(d["type"] == "pitch_change" for d in t["decisions"]) else ""))
