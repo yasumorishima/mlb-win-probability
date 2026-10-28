@@ -63,6 +63,7 @@ LATE = (7, 8, 9)
 TTO = None         # (5, 7) class factors by the starter's time through the order (1, 2, 3, 4+) and relief (CLI --tto)
 TTO_ADVANCE = True  # False: later halves keep the current group (CLI --tto-now-only)
 BF_PER_HALF = 4.3  # batters per half-inning, to place a starter's later innings in the order
+PLACEBO = False    # diagnostic: shuffle the usage rows among the team's own relievers (CLI --placebo)
 PC_EDGES = None    # starter-length buckets by pitches thrown instead of batters faced (CLI --pc-edges)
 FIRST = 7          # first inning whose relievers come from usage (CLI --first-inning; 7 = the sized / tested layer)
 LEADS = ("behind", "tied", "close", "big")
@@ -115,6 +116,16 @@ def tired_table(pa: pd.DataFrame) -> dict:
         a2 = app.get((t, dt - pd.Timedelta(days=2)), set())
         out[(t, dt)] = a1 & a2
     return out
+
+
+def shuffle_roles(u: dict, team, date) -> dict:
+    """Placebo: the same usage rows handed to the team's relievers in a random order
+    (seeded by team and date), so the total relief usage stays but who pitches which
+    inning / score state is random. Availability is still applied to the real ids."""
+    ids = sorted(u)
+    seed = int(team) * 1_000_000 + pd.Timestamp(date).toordinal()
+    perm = np.random.default_rng(seed).permutation(len(ids))
+    return {ids[perm[j]]: u[ids[j]] for j in range(len(ids))}
 
 
 def used_before(pa: pd.DataFrame) -> tuple[list, list]:
@@ -259,6 +270,8 @@ def run_season(a) -> None:
         def late(team, used, h, ids, fld_team_pen, slot_pick, variant):
             """{(inning idx, lead state): (R,) distribution at each start state} for this team's pitching."""
             u = usage.get((team, date), {})
+            if PLACEBO and u:
+                u = shuffle_roles(u, team, date)
             avail = {p for p in u if p not in used and p not in tired.get((team, date), set())}
             W, tot = mixture_weights(u, avail, variant)
             pool = rd(h, ids, "pool", fld_team_pen, team, rel)
@@ -318,7 +331,7 @@ def run_season(a) -> None:
     for v in variants:
         d["wp_new"] = outs[v]
         d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(
-            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}{'_pc' if PC_EDGES is not None else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
+            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}{'_pc' if PC_EDGES is not None else ''}{'_plc' if PLACEBO else ''}{'_w' + str(WINDOW_DAYS) if WINDOW_DAYS != 30 else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
 
@@ -376,9 +389,13 @@ def main() -> None:
                     help="first inning whose relievers come from usage (default 7 = the tested layer)")
     ap.add_argument("--pc-edges", type=lambda x: [int(v) for v in x.split(",")],
                     help="starter-length buckets by pitches thrown, e.g. 0,30,45,60,75,85,95,105,1000")
+    ap.add_argument("--window", type=int, default=30, help="usage window in days (default 30 = the tested layer)")
+    ap.add_argument("--placebo", action="store_true", help="diagnostic: usage roles shuffled within each team")
     a = ap.parse_args()
-    global FIRST, TTO, TTO_ADVANCE, PC_EDGES
+    global FIRST, TTO, TTO_ADVANCE, PC_EDGES, PLACEBO, WINDOW_DAYS
+    WINDOW_DAYS = a.window
     PC_EDGES = a.pc_edges
+    PLACEBO = a.placebo
     TTO_ADVANCE = not a.tto_now_only
     FIRST = a.first_inning
     if a.tto:
