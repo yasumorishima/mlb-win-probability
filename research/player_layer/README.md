@@ -162,6 +162,26 @@ Difference −0.00002 (95% −0.00006 to +0.00002); by season
 2022 −0.00005, 2023 +0.00004, 2024 −0.00003, 2025 −0.00004. Not better in every season and the interval
 includes 0: no gain at this size, so it is not taken further (PEN_RECAL stays).
 
+## Times through the order (sizing 2022-2025, 2026 not read)
+PA level (`size_tto.py`, `published/size_tto.json`): class factors by the starter's time through the order
+(1, 2, 3, 4+) and for relievers, fitted on the other four of 2021-2025, on top of the player layer's PA
+probabilities: log loss −0.00071 (95% −0.00080 to −0.00061), every season; largest the third
+time through (−0.00270; strikeouts about 13% fewer, extra-base hits more).
+
+WP level (`size_pen.py --tto`, recalibrated out of fold as PEN_RECAL, `size_vs_pen.py`; gate: without
+`--tto` the 40-game file of 2022 is reproduced, 1.1e-16):
+
+| | Brier (recalibrated) | minus PEN_RECAL (95%) | by season 2022-2025 |
+|---|---|---|---|
+| PEN_RECAL | 0.153362 | | |
+| TTO, later innings at the expected later time through | 0.153458 | +0.00010 (+0.00006 to +0.00013) | +0.00014, +0.00009, +0.00008, +0.00008 |
+| TTO in the current half only | 0.153438 | +0.00008 (+0.00004 to +0.00011) | +0.00011, +0.00008, +0.00005, +0.00006 |
+
+Both are **worse** in every season. The PA-level gain does not carry over to the win probability; a
+likely reason is selection: a starter who is still pitching later in the game is having a good day,
+which the starter-length model already reflects, so a penalty for his later times through overstates
+it. Not taken further (PEN_RECAL stays).
+
 ## Next
 1. Compare with the team layer on the same rows (the team layer was
    fitted on 2021-2025, so only a 2026 comparison is fair), then freeze a
