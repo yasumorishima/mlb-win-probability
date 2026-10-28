@@ -1,6 +1,6 @@
 """
 Gate: the bench's bullpen usage under the PENR rules (pen_usage.py: 60 days, 5 lead states,
-KAPPA 0.25, from published/bullpen_usage_<season>.json) equals size_pen_x2.py's usage tables and
+KAPPA 0.25, TAU 1, from published/bullpen_usage_<season>.json) equals size_pen_x3.py's usage tables and
 mixture weights on sampled team-days.
 
   python research/player_layer/check_usage_penr.py --states S --season 2026 --n 300
@@ -17,7 +17,7 @@ sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parents[1]))
 import pa_rates as R  # noqa: E402
 import pen_usage as PU  # noqa: E402
-import size_pen_x2 as X  # noqa: E402
+import size_pen_x3 as X  # noqa: E402
 from size_game import game_context  # noqa: E402
 
 
@@ -27,7 +27,7 @@ def main() -> None:
     ap.add_argument("--season", type=int, default=2026)
     ap.add_argument("--n", type=int, default=300)
     a = ap.parse_args()
-    X.WINDOW_DAYS, X.LEAD5, X.KAPPA = PU.BENCH_WINDOW_DAYS, True, PU.BENCH_KAPPA
+    X.WINDOW_DAYS, X.LEAD5, X.KAPPA, X.TAU = PU.BENCH_WINDOW_DAYS, True, PU.BENCH_KAPPA, PU.BENCH_TAU
     pa = game_context(R.lineup_slots(R.load_pa(a.states, [a.season])))
     tab = X.usage_tables(pa)
     keys = sorted(tab)
@@ -42,7 +42,7 @@ def main() -> None:
             continue
         av = set(list(want)[: max(1, len(want) - 2)])          # some relievers unavailable
         Wx, tx = X.mixture_weights(want, av, "B")
-        Wp, tp = PU.weights(got, list(av), "B", states=PU.BENCH_STATES)
+        Wp, tp = PU.weights(got, list(av), "B", states=PU.BENCH_STATES, tau=PU.BENCH_TAU)
         k7 = 7 - X.FIRST
         for (ii, ls), w in Wp.items():
             wx = Wx[(ii + k7, ls)] if ii < 3 else Wx[(10 - X.FIRST, ls)]
