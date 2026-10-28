@@ -217,6 +217,19 @@ About half of the usage layer's gain over the pooled bullpen comes from roles (w
 at each score), the other half from the recent relief corps and availability; both parts are positive in
 every season. This is a diagnostic, not a candidate.
 
+## Usage window (sizing 2022-2025, 2026 not read)
+`size_pen_x.py --window N`: reliever usage counted over the previous N days instead of 30 (same season,
+same rules otherwise). Recalibrated out of fold as PEN_RECAL (`size_vs_pen.py`). Windows tried: 30, 60, 120.
+
+| | Brier (recalibrated) | minus PEN_RECAL (95%) | by season 2022-2025 | 0.3-0.5 band |
+|---|---|---|---|---|
+| 30 days (PEN_RECAL) | 0.153362 | | | +0.55 pt |
+| 60 days | 0.153269 | -0.000093 (-0.000118 to -0.000068) | -0.000053, -0.000105, -0.000096, -0.000117 | +0.53 pt |
+| 120 days | 0.153278 | -0.000084 (-0.000120 to -0.000048) | -0.000039, -0.000101, -0.000110, -0.000086 | +0.52 pt |
+
+Both longer windows are better in every season; 60 days has the lower mean and goes to a pre-registered
+test on 2026 against PEN_RECAL (`PREREG_PENW.md`).
+
 ## Next
 1. Compare with the team layer on the same rows (the team layer was
    fitted on 2021-2025, so only a 2026 comparison is fair), then freeze a
