@@ -1,0 +1,81 @@
+{
+ "frozen": {
+  "status_frozen": true,
+  "n_listed": 29,
+  "mismatched": {},
+  "prereg_md5": "c3ff7882912c975601e2f7772e31d993",
+  "script_md5": "0d61f77c584cc7ef414c9c198aa9e7ec"
+ },
+ "versions": {
+  "python": "3.13.17",
+  "numpy": "2.5.3",
+  "pandas": "3.0.5"
+ },
+ "pred_md5": "59c936efd04621678a0734f3cf3bb22d",
+ "pen_part_md5": {
+  "penB_2026_part0.parquet": "d0329712d57441fb7e73f6bfd03513ac",
+  "penB_2026_part1.parquet": "fe6e4b7c0cfcbbbeab875c1f52e8c6f4",
+  "penB_2026_part2.parquet": "b281a3c1da82f56c7fbbf4b43e09d1fd",
+  "penB_2026_part3.parquet": "d255c1625a9380dca907da7e65d2d672"
+ },
+ "arms": {
+  "PEN_RECAL": {
+   "brier": 0.15506329847438718,
+   "log_loss": 0.463138664881557,
+   "band_0.3_0.5_gap_pt": 0.6428590001265055
+  },
+  "TEAM": {
+   "brier": 0.15679721171307567,
+   "log_loss": 0.4674254883257454,
+   "band_0.3_0.5_gap_pt": 1.08858741524952
+  },
+  "PLAYER": {
+   "brier": 0.15676370453592647,
+   "log_loss": 0.46700196205380695,
+   "band_0.3_0.5_gap_pt": 1.6728282158693153
+  },
+  "ENGINE": {
+   "brier": 0.15845072284081801,
+   "log_loss": 0.4713838491323156,
+   "band_0.3_0.5_gap_pt": 3.2625148702434714
+  },
+  "PEN": {
+   "brier": 0.15525342761538244,
+   "log_loss": 0.46358576323204154,
+   "band_0.3_0.5_gap_pt": 2.528215757942376
+  },
+  "BLEND": {
+   "brier": 0.1564022978253548,
+   "log_loss": 0.4662298277072555,
+   "band_0.3_0.5_gap_pt": 0.9661915491295803
+  }
+ },
+ "n_rows": 184327,
+ "n_games": 2429,
+ "tests": {
+  "H1_PEN_RECAL_minus_TEAM": {
+   "mean": -0.0017339132386884754,
+   "ci95": [
+    -0.002620221646356271,
+    -0.0007594651872748306
+   ],
+   "p_one_sided": 0.0004997501249375312
+  },
+  "H2_PEN_RECAL_minus_PLAYER": {
+   "mean": -0.0017004060615393017,
+   "ci95": [
+    -0.0022712469540424936,
+    -0.0011157896554486357
+   ],
+   "p_one_sided": 0.0004997501249375312
+  }
+ },
+ "holm_adjusted_p": {
+  "H1_PEN_RECAL_minus_TEAM": 0.0009995002498750624,
+  "H2_PEN_RECAL_minus_PLAYER": 0.0009995002498750624
+ },
+ "supported": {
+  "H1_PEN_RECAL_minus_TEAM": true,
+  "H2_PEN_RECAL_minus_PLAYER": true
+ }
+}
