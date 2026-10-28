@@ -16,7 +16,7 @@ only (2026 not read), every arm recalibrated out of fold as PENR_RECAL and compa
 | **1** | **−0.000246 (−0.000272 to −0.000221)** | **−0.000172 / −0.000264 / −0.000293 / −0.000255** | `size_vs_penr_t1.json` |
 | 0 | −0.000203 (−0.000249 to −0.000156) | −0.000117 / −0.000247 / −0.000277 / −0.000169 | `size_vs_penr_t0.json` |
 
-Values tried: 5, 1, 0 (no others). TAU 1 was chosen because its 2022-2025 mean was lowest (the same rule as
+Values tried, in this order and only after the PENR 2026 result was known: 5, 1, 0 (no others; 0 was run after 1 was seen to be the best so far). Command per value: `size_vs_base.py --base /root/claude-scratch/player/penk025 --base-tag penB_w60_l5_k0 --cand <dir> --cand-tag penB_w60_l5_k0_t<TAU>p0`. TAU 1 was chosen because its 2022-2025 mean was lowest (the same rule as
 the window and KAPPA); it is an interior point of the values tried, picked on the same data that fits the
 recalibration, so the −0.00025 is an optimistic estimate and the 2025 rehearsal below is not independent.
 

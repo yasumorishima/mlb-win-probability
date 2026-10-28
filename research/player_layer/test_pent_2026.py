@@ -1,10 +1,10 @@
 """
 Pre-registered test of PENT_RECAL on 2026 (PREREG_PENT.md).
 
-PENT_RECAL = PENT_RECAL (60-day usage, five lead states, KAPPA 0.25) with the lead-state
+PENT_RECAL = PENR_RECAL (60-day usage, five lead states, KAPPA 0.25) with the lead-state
 smoothing TAU 1 instead of 20 (size_pen_x3.py --window 60 --lead5 --kappa 0.25 --tau 1,
 variant B), recalibrated with the same logistic layer fitted on its 2022-2025 out-of-fold
-sizing predictions only. The comparison arm PENT_RECAL is the frozen, already scored 2026
+sizing predictions only. The comparison arm PENR_RECAL is the frozen, already scored 2026
 prediction (published/penr_2026.parquet, PREREG_PENR.md).
 
   fit      : python test_pent_2026.py fit --states S --pen P
