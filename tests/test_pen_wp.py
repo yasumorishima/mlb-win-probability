@@ -25,8 +25,8 @@ def test_missing_plate_appearances_keep_the_old_value():
 def test_files_cover_2022_to_2026_and_match_the_scored_predictions():
     for s in pen_wp.SEASONS:
         assert (pen_wp.DIR / f"pen_wp_{s}.parquet").exists()
-    scored = pd.read_parquet(pen_wp.DIR / "penw_2026.parquet", columns=["game_pk", "at_bat_index", "p_PENW_RECAL"]).head(500)
-    for g, i, p in zip(scored.game_pk, scored.at_bat_index, scored.p_PENW_RECAL):   # PREREG_PENW, H1 supported
+    scored = pd.read_parquet(pen_wp.DIR / "penr_2026.parquet", columns=["game_pk", "at_bat_index", "p_PENR_RECAL"]).head(500)
+    for g, i, p in zip(scored.game_pk, scored.at_bat_index, scored.p_PENR_RECAL):   # PREREG_PENR, H1 supported
         assert abs(pen_wp.game(int(g), "2026-07-01")[int(i)] - p) <= 5.1e-5
 
 
