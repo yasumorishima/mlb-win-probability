@@ -103,7 +103,7 @@ def main() -> None:
     if a.out:
         a.out.parent.mkdir(parents=True, exist_ok=True)
         model = recs[0]["model"] if recs else ""
-        a.out.write_text(json.dumps({"model": model, "season": 2026, "checked": dict(c), "notes": keep},
+        a.out.write_text(json.dumps({"model": model, "season": int(a.out.stem.split("_")[-1]), "checked": dict(c), "notes": keep},
                                     ensure_ascii=False, indent=0))
         print("wrote", a.out, len(keep))
 

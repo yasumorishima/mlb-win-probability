@@ -1,5 +1,5 @@
 """
-Per-game inputs for the look-back game notes (2026 regular season).
+Per-game inputs for the look-back game notes (regular season; --season, default 2026).
 
   python research/game_notes/build_inputs.py --states S --out research/game_notes/work/inputs_2026.jsonl
 
@@ -22,7 +22,7 @@ import pandas as pd
 import requests
 
 ROOT = Path(__file__).resolve().parents[2]
-PEN = ROOT / "research/player_layer/published/pen_wp_2026.parquet"
+PEN_DIR = ROOT / "research/player_layer/published"
 EVENT_JA = {"single": "シングルヒット", "double": "二塁打", "triple": "三塁打", "home_run": "ホームラン", "walk": "四球",
             "intent_walk": "敬遠", "hit_by_pitch": "死球", "strikeout": "三振", "field_out": "凡打", "force_out": "封殺",
             "grounded_into_double_play": "併殺打", "double_play": "併殺", "sac_fly": "犠牲フライ", "sac_bunt": "犠牲バント",
@@ -56,18 +56,23 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--states", type=Path, required=True)
     ap.add_argument("--out", type=Path, required=True)
+    ap.add_argument("--season", type=int, default=2026)
+    ap.add_argument("--newest-first", action="store_true", help="write games in reverse date order")
     a = ap.parse_args()
-    pa = pd.read_parquet(a.states / "pa_2026.parquet").sort_values(["game_pk", "at_bat_index"])
-    wp = pd.read_parquet(PEN)
+    pa = pd.read_parquet(a.states / f"pa_{a.season}.parquet").sort_values(["game_pk", "at_bat_index"])
+    wp = pd.read_parquet(PEN_DIR / f"pen_wp_{a.season}.parquet")
     pa = pa.merge(wp, on=["game_pk", "at_bat_index"], how="left")
     if pa.wp.isna().any():
         sys.exit("missing look-back WP")
-    teams = {t["id"]: t["name"] for t in requests.get("https://statsapi.mlb.com/api/v1/teams?sportId=1&season=2026", timeout=30).json()["teams"]}
+    teams = {t["id"]: t["name"] for t in requests.get(f"https://statsapi.mlb.com/api/v1/teams?sportId=1&season={a.season}", timeout=30).json()["teams"]}
     nm = names(sorted(set(pa.batter.astype(int)) | set(pa.pitcher.astype(int))))
     a.out.parent.mkdir(parents=True, exist_ok=True)
     n = 0
     with a.out.open("w") as f:
-        for g, d in pa.groupby("game_pk", sort=True):
+        order = pa.groupby("game_pk").date.first().sort_values(ascending=not a.newest_first, kind="stable").index
+        groups = dict(tuple(pa.groupby("game_pk", sort=False)))
+        for g in order:
+            d = groups[g]
             d = d.reset_index(drop=True)
             home, away = teams[int(d.home_team[0])], teams[int(d.away_team[0])]
             last = d.iloc[-1]
