@@ -44,8 +44,8 @@ from wp_engine import END, MAX_RUNS, STATES, Engine, _force, _skey, _state  # no
 C = R.PA_CLASSES
 RUNS = np.arange(MAX_RUNS + 1)
 # lead state of the fielding team for every start difference (home - away): home fields in the top half
-PEN_LEAD = {"top": np.array([PU.lead_state(int(d)) for d in G.D]),
-            "bottom": np.array([PU.lead_state(int(-d)) for d in G.D])}
+PEN_LEAD = {"top": np.array([PU.lead_state_n(int(d), PU.BENCH_STATES) for d in G.D]),
+            "bottom": np.array([PU.lead_state_n(int(-d), PU.BENCH_STATES) for d in G.D])}
 HAND_BETA, HAND_K = 0.5, 2000.0
 
 
@@ -175,8 +175,8 @@ class Bench:
     def _late_tables(self, m, data, half, lineup, avail: dict, pool_counts, dfn, slot_pick) -> dict:
         """{(inning idx, lead state, start state): runs (R,)} for innings 7+ of
         the team pitching in `half` (size_pen.py variant B)."""
-        W, tot = PU.weights(avail, list(avail), "B")
-        pool_w = PU.KAPPA / (PU.KAPPA + tot)
+        W, tot = PU.weights(avail, list(avail), "B", states=PU.BENCH_STATES)
+        pool_w = PU.pool_weight(tot, PU.BENCH_KAPPA)
         pool = self._rp_dist(half, lineup, "pool", pool_counts, dfn, m.park)
         out = {}
         for (ii, ls), w in W.items():
