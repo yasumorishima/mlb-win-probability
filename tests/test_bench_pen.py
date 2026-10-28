@@ -122,8 +122,8 @@ def test_lead_state_of_the_fielding_team():
 def test_bench_mixture_follows_the_penr_rules_and_defaults_stay():
     import bench_live as BL
     # PREREG_PENW / PREREG_PENR (H1 supported): 60 days, 5 lead states, KAPPA 0.25; the study's pick keeps 30 / 4 / 30
-    assert (PU.BENCH_WINDOW_DAYS, PU.BENCH_STATES, PU.BENCH_KAPPA) == (60, 5, 0.25)
-    assert (PU.WINDOW_DAYS, PU.KAPPA) == (30, 30.0)
+    assert (PU.BENCH_WINDOW_DAYS, PU.BENCH_STATES, PU.BENCH_KAPPA, PU.BENCH_TAU) == (60, 5, 0.25, 1.0)
+    assert (PU.WINDOW_DAYS, PU.KAPPA, PU.TAU) == (30, 30.0, 20.0)
     t, d0 = RAW["late5"][len(RAW["late5"]) // 2][:2]
     day = date.fromisoformat(d0)
     exp = {}
@@ -153,7 +153,7 @@ def test_five_state_rows_collapse_to_the_four_state_rows():
 def test_bench_pool_weight_is_kappa_025():
     m, data, closer = _closer_case()
     av = {p: u for p, u in data.pen_avail_fld.items() if p != m.pitcher}
-    W, tot = PU.weights(av, list(av), "B", states=5)
+    W, tot = PU.weights(av, list(av), "B", states=5, tau=1.0)
     plan = BL.pen_plan(replace(m, diff=-2), data, {closer: "CLOSER"})
     ninth = next(r for r in plan if r["inning"] == 9)
     assert abs(ninth["other"] - (1 - sum(x for _, x in ninth["rows"]))) < 1e-12
@@ -169,3 +169,15 @@ def test_bench_later_halves_use_the_bench_kappa(monkeypatch):
         b._cache = {}
         out[k] = b.later_halves(m, data, m.lineup)[(9, "bottom")]
     assert np.abs(out[0.25] - out[30.0]).max() > 1e-4      # the pool weight in bench.py follows BENCH_KAPPA
+
+
+def test_bench_later_halves_use_the_bench_tau(monkeypatch):
+    m, data, closer = _closer_case()
+    data.pen_avail_fld = {p: u + 0.5 for p, u in data.pen_avail_fld.items()}   # usage in every state, so TAU matters
+    b = BL._bench(True)
+    out = {}
+    for t in (1.0, 20.0):
+        monkeypatch.setattr(PU, "BENCH_TAU", t)
+        b._cache = {}
+        out[t] = b.later_halves(m, data, m.lineup)[(9, "bottom")]
+    assert np.abs(out[1.0] - out[20.0]).max() > 1e-5      # bench.py passes BENCH_TAU to the mixture

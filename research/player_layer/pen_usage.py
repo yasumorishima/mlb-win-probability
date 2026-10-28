@@ -31,7 +31,7 @@ WINDOW_DAYS, TAU, KAPPA = 30, 20.0, 30.0
 # The bench options' bullpen mixture follows the look-back win probability's rules (PENR_RECAL:
 # PREREG_PENW / PREREG_PENR, both H1 supported): 60 days, 5 lead states, KAPPA 0.25. The defaults
 # above (30 days, 4 states, KAPPA 30) stay for the bench-call study's usage-pattern pick.
-BENCH_WINDOW_DAYS, BENCH_STATES, BENCH_KAPPA = 60, 5, 0.25
+BENCH_WINDOW_DAYS, BENCH_STATES, BENCH_KAPPA, BENCH_TAU = 60, 5, 0.25, 1.0   # TAU: PREREG_PENT (H1 supported)
 
 
 def lead_state(lead: int) -> int:
@@ -94,7 +94,7 @@ def tired(team: int, day: Date, season: int | None = None) -> set:
     return rel.get((int(team), day - timedelta(days=1)), set()) & rel.get((int(team), day - timedelta(days=2)), set())
 
 
-def weights(u: dict, avail, variant: str = "B", states: int | None = None) -> tuple[dict, float]:
+def weights(u: dict, avail, variant: str = "B", states: int | None = None, tau: float = TAU) -> tuple[dict, float]:
     """Same as size_pen.mixture_weights."""
     W = {}
     avail = [p for p in avail if p in u]
@@ -105,7 +105,7 @@ def weights(u: dict, avail, variant: str = "B", states: int | None = None) -> tu
         for ls in range(states or (next(iter(u.values())).shape[1] if u else 4)):
             w = {}
             for p, x in rows.items():
-                v = x.sum() if variant == "A" else x[:, ls].sum() + TAU * x.sum() / max(tot_i, 1.0)
+                v = x.sum() if variant == "A" else x[:, ls].sum() + tau * x.sum() / max(tot_i, 1.0)
                 if v > 0:
                     w[p] = v
             W[(ii, ls)] = w

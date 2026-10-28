@@ -241,7 +241,7 @@ def pen_plan(m, data, names: dict, top: int = 3) -> list[dict] | None:
     if data.pen_avail_fld is None:
         return None
     av = {p: u for p, u in data.pen_avail_fld.items() if p != m.pitcher}
-    W, tot = PU.weights(av, list(av), "B", states=PU.BENCH_STATES)
+    W, tot = PU.weights(av, list(av), "B", states=PU.BENCH_STATES, tau=PU.BENCH_TAU)
     pool_w = PU.pool_weight(tot, PU.BENCH_KAPPA)
     lead = m.diff if m.half == "top" else -m.diff          # the fielding team is home in the top half
     ls = PU.lead_state_n(int(lead), PU.BENCH_STATES)

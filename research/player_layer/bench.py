@@ -175,7 +175,7 @@ class Bench:
     def _late_tables(self, m, data, half, lineup, avail: dict, pool_counts, dfn, slot_pick) -> dict:
         """{(inning idx, lead state, start state): runs (R,)} for innings 7+ of
         the team pitching in `half` (size_pen.py variant B)."""
-        W, tot = PU.weights(avail, list(avail), "B", states=PU.BENCH_STATES)
+        W, tot = PU.weights(avail, list(avail), "B", states=PU.BENCH_STATES, tau=PU.BENCH_TAU)
         pool_w = PU.pool_weight(tot, PU.BENCH_KAPPA)
         pool = self._rp_dist(half, lineup, "pool", pool_counts, dfn, m.park)
         out = {}

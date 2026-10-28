@@ -1,9 +1,9 @@
 """
 Win probability of finished games 2022-2026 from the player layer with the
-late-inning bullpen by usage (60 days, five lead states, weak pooling), recalibrated
-(PENR_RECAL). Pre-registered and scored on 2026: better than PENW_RECAL, which beat PEN_RECAL,
-which beat the team layer and the player layer v1 (research/player_layer/RESULTS_PENR_2026.md,
-RESULTS_PENW_2026.md, RESULTS_PEN_2026.md). Used by the look-back view; live and the API keep the team layer.
+late-inning bullpen by usage (60 days, five lead states, weak pooling, TAU 1), recalibrated
+(PENT_RECAL). Pre-registered and scored on 2026, each step better than the one before:
+PENT_RECAL > PENR_RECAL > PENW_RECAL > PEN_RECAL > team layer (research/player_layer/RESULTS_PENT_2026.md
+and the earlier RESULTS_PEN*_2026.md). Used by the look-back view; live and the API keep the team layer.
 
 Files: research/player_layer/published/pen_wp_<season>.parquet
 (game_pk, at_bat_index, wp = home WP before that plate appearance),
