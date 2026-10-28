@@ -146,6 +146,22 @@ the pool measured with the current lineup; on a recorded 2025 game (108
 options, 7th inning or later) that differs from the exact mixture by at
 most 0.06 WP points (`bench_pen_check.py`).
 
+## Relievers by usage from the 4th inning (sizing 2022-2025, 2026 not read)
+`size_pen.py --first-inning 4`: the usage mixture (same rules as variant B: share of the team's relief
+plate appearances in that inning and lead state over 30 days, pool weight from the usage of innings
+4-6 for innings 4-6) replaces the pooled bullpen from the 4th inning instead of the 7th. Both layers
+recalibrated out of fold the same way as PEN_RECAL (`size_vs_pen.py`, `published/size_vs_pen_f4.json`).
+Gate: with the default (7th) the 40-game file of 2022 is reproduced (1.1e-16).
+
+| | Brier (recalibrated) | 0.3-0.5 band |
+|---|---|---|
+| PEN_RECAL (from the 7th) | 0.153362 | +0.55 pt |
+| from the 4th | 0.153342 | +0.55 pt |
+
+Difference −0.00002 (95% −0.00006 to +0.00002); by season
+2022 −0.00005, 2023 +0.00004, 2024 −0.00003, 2025 −0.00004. Not better in every season and the interval
+includes 0: no gain at this size, so it is not taken further (PEN_RECAL stays).
+
 ## Next
 1. Compare with the team layer on the same rows (the team layer was
    fitted on 2021-2025, so only a 2026 comparison is fair), then freeze a
