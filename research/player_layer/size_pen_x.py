@@ -331,7 +331,7 @@ def run_season(a) -> None:
     for v in variants:
         d["wp_new"] = outs[v]
         d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(
-            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}{'_pc' if PC_EDGES is not None else ''}{'_plc' if PLACEBO else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
+            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}{'_pc' if PC_EDGES is not None else ''}{'_plc' if PLACEBO else ''}{'_w' + str(WINDOW_DAYS) if WINDOW_DAYS != 30 else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
 
@@ -389,9 +389,11 @@ def main() -> None:
                     help="first inning whose relievers come from usage (default 7 = the tested layer)")
     ap.add_argument("--pc-edges", type=lambda x: [int(v) for v in x.split(",")],
                     help="starter-length buckets by pitches thrown, e.g. 0,30,45,60,75,85,95,105,1000")
+    ap.add_argument("--window", type=int, default=30, help="usage window in days (default 30 = the tested layer)")
     ap.add_argument("--placebo", action="store_true", help="diagnostic: usage roles shuffled within each team")
     a = ap.parse_args()
-    global FIRST, TTO, TTO_ADVANCE, PC_EDGES, PLACEBO
+    global FIRST, TTO, TTO_ADVANCE, PC_EDGES, PLACEBO, WINDOW_DAYS
+    WINDOW_DAYS = a.window
     PC_EDGES = a.pc_edges
     PLACEBO = a.placebo
     TTO_ADVANCE = not a.tto_now_only

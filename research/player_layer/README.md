@@ -199,6 +199,24 @@ of pitches equals `size_game2.starter_table` (diff 0); without the option `size_
 Not better in every season (2023 worse) and the interval includes 0: no gain at this size, not taken
 further (PEN_RECAL stays). Band 0.3-0.5 unchanged (+0.55 pt).
 
+## Where the bullpen gain comes from: placebo (diagnostic, 2022-2025, 2026 not read)
+`size_pen_x.py --placebo`: each team's usage rows (relief plate appearances by inning and lead state over 30
+days) are handed to its own relievers in a random order (seeded by team and date), so the team's recent
+relief corps, its total usage and the availability rules (used / pitched both previous days) stay, but who
+pitches which inning and score state is random. Compared with the pooled team bullpen (size_game2 "starter",
+the baseline before usage). All recalibrated out of fold as PEN_RECAL (`size_vs_pen.py`,
+`published/size_vs_pen_placebo.json`, `published/size_vs_pen_pooled.json`):
+
+| | Brier (recalibrated) | minus PEN_RECAL (95%) | by season 2022-2025 | 0.3-0.5 band |
+|---|---|---|---|---|
+| PEN_RECAL (usage by role) | 0.153362 | | | +0.55 pt |
+| roles shuffled within the team (placebo) | 0.154229 | +0.00087 (+0.00079 to +0.00094) | +0.00072, +0.00087, +0.00102, +0.00086 | +0.38 pt |
+| pooled team bullpen (no usage) | 0.155096 | +0.00173 (+0.00150 to +0.00196) | +0.00150, +0.00158, +0.00186, +0.00200 | +0.33 pt |
+
+About half of the usage layer's gain over the pooled bullpen comes from roles (who pitches the late innings
+at each score), the other half from the recent relief corps and availability; both parts are positive in
+every season. This is a diagnostic, not a candidate.
+
 ## Next
 1. Compare with the team layer on the same rows (the team layer was
    fitted on 2021-2025, so only a 2026 comparison is fair), then freeze a
