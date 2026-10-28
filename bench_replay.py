@@ -66,7 +66,7 @@ def timeline(feed: dict) -> list[dict]:
         if "bunt" in (res.get("description") or "").lower():
             decisions.append({"type": "bunt", "text": res.get("description", "")})
         out.append({**st, "k": k, "decisions": decisions, "event": res.get("event", ""),
-                    "description": res.get("description", "")})
+                    "description": res.get("description", ""), "at_bat_index": p.get("about", {}).get("atBatIndex")})
     return out
 
 
