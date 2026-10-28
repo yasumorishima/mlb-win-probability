@@ -20,6 +20,7 @@ import bench_live
 import bench_replay
 import bench_screen
 import bench_viz
+import pen_wp
 from analysis import leverage_index
 from live_feed import get_todays_games
 
@@ -46,7 +47,8 @@ TXT = {
            "miss_head": "モデルが 1 ポイント以上の上積みを見ていたのに、その種類の采配がなかった場面（大きい順）",
            "miss_none": "そのような場面はありませんでした（基準：1 ポイント以上）。",
            "miss_row": "{inn}　{team}：{opt}　{g:+.1f} ポイント",
-           "miss_note": "継投は 7 回以降のみ（それより前は大きく出すぎるため）。盗塁は「走れ」の判定のときだけ。"},
+           "miss_note": "継投は 7 回以降のみ（それより前は大きく出すぎるため）。盗塁は「走れ」の判定のときだけ。",
+           "pen_note": "選手・終盤の継投の使い方込みの勝率（2026 年で事前登録して検証済み）"},
     "EN": {"date": "Date", "game": "Game", "none": "No finished games on this date.", "moment": "Moment",
            "prev": "◀ Prev", "next": "Next ▶", "hot": "Biggest moment", "decisions": "Bench decisions", "pick": "(pick)",
            "actual": "What happened", "result": "Result", "swing": "{team} WP {a:.0%} → {b:.0%} ({d:+.0f})",
@@ -68,7 +70,8 @@ TXT = {
            "miss_head": "Moments where the model saw a gain of 1 point or more and no call of that kind was made (largest first)",
            "miss_none": "None (threshold: 1 point).",
            "miss_row": "{inn}  {team}: {opt}  {g:+.1f} pt",
-           "miss_note": "Pitching changes from the 7th inning only (earlier ones are overstated). Steals only when the call is 'go'."},
+           "miss_note": "Pitching changes from the 7th inning only (earlier ones are overstated). Steals only when the call is 'go'.",
+           "pen_note": "WP with players and late-inning bullpen usage (pre-registered, checked on 2026)"},
 }
 DEC_JA = {"pinch": "代打・代走", "pitch_change": "継投", "steal": "盗塁", "bunt": "バント", "intentional_walk": "敬遠",
           "defense": "守備交代"}
@@ -257,6 +260,8 @@ def render(lang: str) -> None:
         return
     k = st.session_state.get("review_k", 0)
     series = bench_viz.wp_series(feed)
+    pw = pen_wp.game(pk, tl[0].get("game_date")) if tl[0].get("game_type") == "R" else {}
+    series, n_pen = pen_wp.apply_to_series(series, [t_.get("at_bat_index") for t_ in tl], pw)
     # navigation
     b1, b2, b3, b4 = st.columns([1, 1, 1, 3])
     if b1.button(x["prev"], key="review_prev", width="stretch") and k > 0:
@@ -316,7 +321,10 @@ def render(lang: str) -> None:
         + (f'<ul style="color:#f0efec;margin:6px 0">{"".join(lines)}</ul>' if lines else "")
         + f'<div style="color:#f0efec">{x["result"]}: {html.escape(t["description"])}</div>'
         f'<div style="color:#c3c2b7">{html.escape(swing)}</div></div>', unsafe_allow_html=True)
-    event = bench_screen._draw(lang, s, opts, mu, series, mark_i=k, chart_key=f"review_wp_{pk}")
+    ab = t.get("at_bat_index")
+    home_wp = pw.get(ab) if (pw and ab is not None) else None
+    event = bench_screen._draw(lang, s, opts, mu, series, mark_i=k, chart_key=f"review_wp_{pk}",
+                               home_wp=home_wp, wp_note=x["pen_note"] if home_wp is not None else None)
     if event is not None:
         pts = (event.get("selection") or {}).get("points") if isinstance(event, dict) else getattr(getattr(event, "selection", None), "points", None)
         if pts:

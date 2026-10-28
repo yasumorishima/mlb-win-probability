@@ -115,6 +115,8 @@ live_feed.get_todays_games = lambda date=None: [{"gamePk": 777, "away_team": "Aw
                                                  "status": "Final", "start_time_utc": ""}]
 team_layer.strengths = lambda h, a, d: {"d_prev": 0.1, "d_cur": 0.0, "teams": {}}
 bench_live.get_feed = lambda pk: FEED
+import pen_wp
+pen_wp.game = lambda pk, d: {i: 0.123 for i in range(200)}     # PEN_RECAL home WP for every plate appearance
 at = AppTest.from_file(ROOT + "/streamlit_app.py", default_timeout=180)
 at.run()
 at.sidebar.radio[0].set_value("JA").run()
@@ -123,6 +125,7 @@ at.radio(key="bench_view_JA").set_value("振り返り").run()
 assert not at.exception, at.exception
 md = " ".join(m.value for m in at.markdown)
 assert "実際には" in md and "勝率" in md
+assert "継投の使い方込みの勝率" in md and (">12%<" in md or ">88%<" in md), md[-1500:]     # the look-back WP is PEN_RECAL
 # jump to the pinch hitter through the decisions list
 sel = [s for s in at.selectbox if s.key and s.key.startswith("review_dec_")][0]
 import bench_replay

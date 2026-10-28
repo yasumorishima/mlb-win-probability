@@ -132,7 +132,7 @@ def _plan_html(plan: list, lang: str, s: dict) -> str:
 
 
 def _draw(lang: str, s: dict, opts: dict | None, mu: dict | None, series: list, mark_i: int | None = None,
-          chart_key: str | None = None):
+          chart_key: str | None = None, home_wp: float | None = None, wp_note: str | None = None):
     """The bench screen's cards and charts for one game moment (live or replayed).
     Returns the WP chart's selection event when `chart_key` is given (review mode)."""
     t = T[lang]
@@ -144,8 +144,10 @@ def _draw(lang: str, s: dict, opts: dict | None, mu: dict | None, series: list, 
                        s.get("home_id"), s.get("away_id"), s.get("game_date"), s.get("game_type"))
     home = tl["team_wp"] if tl.get("applied") else state_wp(s["inning"], s["top_bottom"], s["outs"], s["runners"],
                                                                s["score_diff"], sched, xr)
-    bat_wp = home if bat_home else 1 - home
     player_wp = opts["offense"][0]["wp_offense"] if opts else None
+    if home_wp is not None:          # look-back: PEN_RECAL (players + late bullpen usage, recalibrated)
+        home, player_wp = home_wp, None
+    bat_wp = home if bat_home else 1 - home
     li = leverage_index(s["inning"], s["top_bottom"], s["outs"], s["runners"], s["score_diff"], sched, xr) if s["outs"] < 3 else 0.0
     hot = li >= 1.5
     st.markdown(
@@ -170,6 +172,7 @@ def _draw(lang: str, s: dict, opts: dict | None, mu: dict | None, series: list, 
             f'<div class="wp-big" style="font-size:3.4rem;font-weight:bold;color:#f0efec">{bat_wp:.0%}</div>'
             + (f'<div style="color:#c3c2b7">{t["player"]} <b style="color:#f0efec">{player_wp:.0%}</b></div>'
                if player_wp is not None else "")
+            + (f'<div style="color:#898781;font-size:.85rem">{html.escape(wp_note)}</div>' if wp_note else "")
             + f'<div class="{"li-hot" if hot else ""}" style="margin-top:12px;padding:8px 10px;background:#1f1f3a">'
             f'<span style="color:#c3c2b7">{t["li"]}</span> '
             f'<b style="font-size:1.8rem;color:{"#e66767" if hot else "#f0efec"}">{li:.1f}</b>'

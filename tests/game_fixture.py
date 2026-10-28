@@ -35,7 +35,7 @@ def game_feed() -> dict:
         m = {"batter": {"id": batter, "fullName": f"P{batter}"},
              "pitcher": {"id": pitcher[fld], "fullName": f"P{pitcher[fld]}"}, **(post or {})}
         plays.append({"about": {"inning": inning, "isTopInning": top, "isComplete": True,
-                                "halfInning": "top" if top else "bottom"},
+                                "halfInning": "top" if top else "bottom", "atBatIndex": len(plays)},
                       "result": {"type": "atBat", "event": event, "eventType": event.lower().replace(" ", "_"),
                                  "description": f"P{batter}: {event}", "homeScore": score["home"], "awayScore": score["away"]},
                       "matchup": m, "count": {"outs": outs_before + (event in ("Strikeout", "Groundout"))},
