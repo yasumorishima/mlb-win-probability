@@ -9,9 +9,12 @@ size_stack.py P_RECAL) fitted on the 2022-2025 out-of-fold predictions only.
             (P = dir with size_pen.py penB_2022..2025.parquet; reads 2022-2025 outcomes only)
   dry     : python test_pen_2026.py dry   --states S --pen P
             (gate: refit on 2022-2024, score 2025; must equal size_stack's P_RECAL 2025 Brier; no 2026 read)
-  predict : python test_pen_2026.py predict --states S --pen26 Q --out W
-            (Q = dir with size_pen.py penB_2026_part{0..3}.parquet; no outcome read)
-  score   : python test_pen_2026.py score --states S --out W      (once; needs Status: FROZEN)
+  predict : python test_pen_2026.py predict --states S --hf HF --out W
+            (reads published/penB_2026_part{0..3}.parquet; no outcome read)
+  score   : python test_pen_2026.py score --states S --hf HF --out W   (once; needs Status: FROZEN)
+  score_dry: python test_pen_2026.py score_dry --states S --pen P --game G
+            (rehearsal of the scoring path on 2025 sizing rows: PEN_RECAL fitted on 2022-2024 vs the
+             out-of-fold player layer v1 and engine of size_game.py; no 2026 read)
 
 2026 predictions: size_pen.py --season 2026 --variant B --load-seasons 2021,2022,2023,2024,2025,2026
 --part K/4 (tables fitted on 2021-2025, records / usage from earlier dates only).
@@ -41,6 +44,8 @@ COEF = HERE / "published/pen_recal_coef.json"
 TEAM_FILE = ROOT / "research/wp_layer/published/pred_2026.parquet"
 PLAYER_FILES = [HERE / f"published/pred_2026_part{k}.parquet" for k in range(4)]
 BLEND_FILE = HERE / "published/blend_2026.parquet"
+PEN26_FILES = [HERE / f"published/penB_2026_part{k}.parquet" for k in range(4)]
+PARK_MD5 = "3f1c06008ec1fec5012a8f50338b9687"     # HF park_factors.parquet, same file as test_2026.py
 INPUT_MD5 = {
     "pa_2021.parquet": "10947f7add3b8821ddaa70705b845058",
     "pa_2022.parquet": "bbacd8f9703d5922d615903ebd693ca3",
@@ -61,8 +66,10 @@ def md5(p: Path) -> str:
     return hashlib.md5(p.read_bytes()).hexdigest()
 
 
-def check_inputs(states: Path) -> None:
+def check_inputs(states: Path, hf: Path | None = None) -> None:
     bad = {k: md5(states / k) for k, v in INPUT_MD5.items() if md5(states / k) != v}
+    if hf is not None and md5(hf / "park_factors.parquet") != PARK_MD5:
+        bad["park_factors.parquet"] = md5(hf / "park_factors.parquet")
     if bad:
         sys.exit(f"input md5 mismatch: {bad}")
 
@@ -124,10 +131,9 @@ def cmd_dry(a) -> None:
     print("dry 2025: PEN", float(((te.wp_game.to_numpy() - y) ** 2).mean()), "PEN_RECAL", float(((p - y) ** 2).mean()))
 
 
-def cmd_predict(a) -> None:
-    check_inputs(a.states)
+def pen_2026_rows() -> pd.DataFrame:
     coef = json.loads(COEF.read_text())
-    pen = pd.concat([pd.read_parquet(a.pen26 / f"penB_2026_part{k}.parquet") for k in range(4)], ignore_index=True)
+    pen = pd.concat([pd.read_parquet(f) for f in PEN26_FILES], ignore_index=True)
     base = pd.concat([pd.read_parquet(f) for f in PLAYER_FILES], ignore_index=True)
     d = base.merge(pen[["game_pk", "at_bat_index", "wp_new"]], on=["game_pk", "at_bat_index"], how="left")
     if len(pen) != N_2026 or len(d) != N_2026 or d.wp_new.isna().any() or pen.duplicated(["game_pk", "at_bat_index"]).any():
@@ -138,23 +144,37 @@ def cmd_predict(a) -> None:
     res["p_PEN_RECAL"] = apply(coef, d)
     if not np.isfinite(res.drop(columns=["game_pk", "at_bat_index"]).to_numpy()).all():
         sys.exit("non-finite predictions")
+    return res
+
+
+def cmd_predict(a) -> None:
+    check_inputs(a.states, a.hf)
+    res = pen_2026_rows()
     a.out.mkdir(parents=True, exist_ok=True)
     res.to_parquet(a.out / "pen_2026.parquet", index=False)
-    print("predictions", len(res), {f"part{k}": md5(a.pen26 / f"penB_2026_part{k}.parquet") for k in range(4)})
+    print("predictions", len(res), {f.name: md5(f) for f in PEN26_FILES})
 
 
 def cmd_score(a) -> None:
-    check_inputs(a.states)
+    check_inputs(a.states, a.hf)
     res = {"frozen": frozen(required=True),
            "versions": {"python": sys.version.split()[0], "numpy": np.__version__, "pandas": pd.__version__}}
     d = pd.read_parquet(a.out / "pen_2026.parquet")
     res["pred_md5"] = md5(a.out / "pen_2026.parquet")
+    res["pen_part_md5"] = {f.name: md5(f) for f in PEN26_FILES}
+    again = pen_2026_rows()          # the predictions must come from the frozen parts and coefficients
+    if not (again[["game_pk", "at_bat_index"]].equals(d[["game_pk", "at_bat_index"]])
+            and np.array_equal(again.p_PEN_RECAL.to_numpy(), d.p_PEN_RECAL.to_numpy())
+            and np.array_equal(again.wp_pen.to_numpy(), d.wp_pen.to_numpy())):
+        sys.exit("pen_2026.parquet does not equal the frozen parts + coefficients")
     d = d.merge(pd.read_parquet(TEAM_FILE, columns=["game_pk", "at_bat_index", "p_TEAM"]), on=["game_pk", "at_bat_index"], how="left")
     d = d.merge(pd.read_parquet(BLEND_FILE, columns=["game_pk", "at_bat_index", "p_BLEND"]), on=["game_pk", "at_bat_index"], how="left")
     y_tab = pd.read_parquet(a.states / "pa_2026.parquet", columns=["game_pk", "at_bat_index", "home_won"])
     d = d.merge(y_tab, on=["game_pk", "at_bat_index"], how="left")
     if len(d) != N_2026 or d[["p_TEAM", "p_BLEND", "home_won"]].isna().any().any():
         sys.exit("gate failed")
+    if not np.isfinite(d[["p_PEN_RECAL", "wp_pen", "p_TEAM", "wp_player", "wp_engine", "p_BLEND"]].to_numpy()).all():
+        sys.exit("non-finite predictions")
     y = d.home_won.to_numpy(float)
     arms = {"PEN_RECAL": d.p_PEN_RECAL, "TEAM": d.p_TEAM, "PLAYER": d.wp_player, "ENGINE": d.wp_engine,
             "PEN": d.wp_pen, "BLEND": d.p_BLEND}
@@ -165,13 +185,20 @@ def cmd_score(a) -> None:
         band = (v >= 0.3) & (v < 0.5)
         res["arms"][k] = {"brier": float(se[k].mean()), "log_loss": float(-(y * np.log(p) + (1 - y) * np.log(1 - p)).mean()),
                           "band_0.3_0.5_gap_pt": float(100 * (v[band].mean() - y[band].mean()))}
-    g = d.game_pk.to_numpy()
+    tests, holm, ng = run_tests(d.game_pk.to_numpy(), se, (("H1_PEN_RECAL_minus_TEAM", "TEAM"), ("H2_PEN_RECAL_minus_PLAYER", "PLAYER")))
+    res.update({"n_rows": int(len(d)), "n_games": ng, "tests": tests, "holm_adjusted_p": holm,
+                "supported": {h: bool(v <= 0.05) for h, v in holm.items()}})
+    (a.out / "results_pen_2026.json").write_text(json.dumps(res, indent=1))
+    print(json.dumps(res, indent=1))
+
+
+def run_tests(g, se, pairs):
     ug, gi = np.unique(g, return_inverse=True)
     rng = np.random.default_rng(SEED)
     w = rng.multinomial(len(ug), np.full(len(ug), 1 / len(ug)), size=N_BOOT)
     cnt = w @ np.bincount(gi).astype(float)
     tests = {}
-    for h, other in (("H1_PEN_RECAL_minus_TEAM", "TEAM"), ("H2_PEN_RECAL_minus_PLAYER", "PLAYER")):
+    for h, other in pairs:
         dl = se["PEN_RECAL"] - se[other]
         bs = (w @ np.bincount(gi, weights=dl)) / cnt
         tests[h] = {"mean": float(dl.mean()), "ci95": [float(np.percentile(bs, 2.5)), float(np.percentile(bs, 97.5))],
@@ -182,22 +209,39 @@ def cmd_score(a) -> None:
     for i, h in enumerate(order):
         prev = max(prev, min(1.0, (len(order) - i) * pv[h]))
         holm[h] = prev
-    res.update({"n_rows": int(len(d)), "n_games": int(len(ug)), "tests": tests, "holm_adjusted_p": holm,
-                "supported": {h: bool(v <= 0.05) for h, v in holm.items()}})
-    (a.out / "results_pen_2026.json").write_text(json.dumps(res, indent=1))
-    print(json.dumps(res, indent=1))
+    return tests, holm, int(len(ug))
+
+
+def cmd_score_dry(a) -> None:
+    """Rehearsal on 2025 (sizing rows only): PEN_RECAL fitted on 2022-2024 vs the
+    out-of-fold player layer v1 (TEAM stand-in) and engine (size_game.py)."""
+    check_inputs(a.states)
+    tr = sizing_rows(a.states, a.pen, [2022, 2023, 2024])
+    te = sizing_rows(a.states, a.pen, [2025])
+    w = fit(design(tr, "wp_game", TERMS), tr.home_won.to_numpy(float))
+    te["p_PEN_RECAL"] = apply({"terms": TERMS, "coef": w}, te)
+    v1 = pd.read_parquet(a.game / "game_2025.parquet", columns=["game_pk", "at_bat_index", "wp_game", "wp_league"])
+    te = te.merge(v1.rename(columns={"wp_game": "wp_v1"}), on=["game_pk", "at_bat_index"], how="left")
+    y = te.home_won.to_numpy(float)
+    se = {"PEN_RECAL": (te.p_PEN_RECAL.to_numpy() - y) ** 2, "PLAYER_v1": (te.wp_v1.to_numpy() - y) ** 2,
+          "ENGINE_oof": (te.wp_league.to_numpy() - y) ** 2}
+    tests, holm, ng = run_tests(te.game_pk.to_numpy(), se, (("PEN_RECAL_minus_ENGINE_oof", "ENGINE_oof"),
+                                                            ("PEN_RECAL_minus_PLAYER_v1", "PLAYER_v1")))
+    print(json.dumps({"n_rows": len(te), "n_games": ng, "brier": {k: float(v.mean()) for k, v in se.items()},
+                      "tests": tests, "holm": holm}, indent=1))
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["fit", "dry", "predict", "score"])
+    ap.add_argument("mode", choices=["fit", "dry", "predict", "score", "score_dry"])
     ap.add_argument("--states", type=Path, required=True)
     ap.add_argument("--pen", type=Path, help="size_pen.py sizing output (penB_2022..2025)")
-    ap.add_argument("--pen26", type=Path, help="size_pen.py 2026 output (penB_2026_part0..3)")
+    ap.add_argument("--hf", type=Path, help="dir with HF park_factors.parquet (md5-checked)")
+    ap.add_argument("--game", type=Path, help="size_game.py output (game_2025.parquet) for score_dry")
     ap.add_argument("--out", type=Path)
     ap.add_argument("--out-coef", type=Path, default=COEF)
     a = ap.parse_args()
-    {"fit": cmd_fit, "dry": cmd_dry, "predict": cmd_predict, "score": cmd_score}[a.mode](a)
+    {"fit": cmd_fit, "dry": cmd_dry, "predict": cmd_predict, "score": cmd_score, "score_dry": cmd_score_dry}[a.mode](a)
 
 
 if __name__ == "__main__":
