@@ -9,7 +9,10 @@ def _setup(monkeypatch):
     u = {11: np.zeros((3, 4)), 22: np.zeros((3, 4))}
     u[11][1, 2] = 30          # 8th inning, ahead by 1-3: pitcher 11
     u[22][1, 1] = 30          # 8th inning, tied: pitcher 22
-    monkeypatch.setattr(BL.PU, "usage", lambda team, day, season=None: u)
+    def usage(team, day, season=None, window=BL.PU.WINDOW_DAYS):
+        assert window == 30                     # the bench-call study's rule, not the bench's 60-day mixture
+        return u
+    monkeypatch.setattr(BL.PU, "usage", usage)
     opts = {"all": [{"kind": "pitch_change", "option": "pitch_change:11", "wp_offense": 0.30},
                     {"kind": "pitch_change", "option": "pitch_change:22", "wp_offense": 0.40},
                     {"kind": "pitch_change", "option": "pitch_change:33", "wp_offense": 0.20}]}

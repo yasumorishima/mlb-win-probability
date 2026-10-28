@@ -251,7 +251,7 @@ def usage_pick(t: dict, tl: list[dict], dec: dict, opts: dict | None) -> dict | 
     first = next(j for j, q in enumerate(tl) if q["inning"] == t["inning"] and q["top_bottom"] == t["top_bottom"])
     h0, a0 = (tl[first - 1]["home_score"], tl[first - 1]["away_score"]) if first else (0, 0)
     lead = (h0 - a0) if side == "home" else (a0 - h0)
-    u = BL.PU.usage(int(team), _date.fromisoformat(str(t["game_date"])[:10]))
+    u = BL.PU.usage(int(team), _date.fromisoformat(str(t["game_date"])[:10]), window=30)   # the study's rule
     av = {p: u[p] for p in cands if p in u}
     W, _ = BL.PU.weights(av, list(av), "B")
     ii = 3 if (t["inning"] >= 10 or t["inning"] == 6) else t["inning"] - 7

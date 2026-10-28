@@ -115,3 +115,20 @@ def test_lead_state_of_the_fielding_team():
     assert B.PEN_LEAD["top"][at(2)] == 2 and B.PEN_LEAD["top"][at(-1)] == 0 and B.PEN_LEAD["top"][at(5)] == 3
     # bottom half: the away team fields, its lead = away - home
     assert B.PEN_LEAD["bottom"][at(-1)] == 2 and B.PEN_LEAD["bottom"][at(1)] == 0 and B.PEN_LEAD["bottom"][at(0)] == 1
+
+
+def test_bench_mixture_uses_60_days_and_default_stays_30():
+    import bench_live as BL
+    assert PU.BENCH_WINDOW_DAYS == 60 and PU.WINDOW_DAYS == 30     # PREREG_PENW (H1 supported); frozen study keeps 30
+    t, d0 = RAW["late"][len(RAW["late"]) // 2][:2]
+    day = date.fromisoformat(d0)
+    exp = {}
+    for tt, dd, p, ii, ls, n in RAW["late"]:
+        x = date.fromisoformat(dd)
+        if tt == t and day - timedelta(days=60) <= x < day:
+            exp.setdefault(p, np.zeros((3, 4)))[ii, ls] += n
+    gd = {"datetime": {"officialDate": d0}, "game": {"type": "R"}}
+    got = BL.pen_usage_for(gd, t, None)
+    tired = PU.tired(t, day)
+    assert set(got) == {p for p in exp if p not in tired}
+    assert all(np.array_equal(got[p], exp[p]) for p in got)
