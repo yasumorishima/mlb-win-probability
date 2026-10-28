@@ -1,11 +1,12 @@
 """
-Per-plate-appearance home win probability for the look-back view: PENW_RECAL
-(60-day usage window; registered consequence of PREREG_PENW.md / RESULTS_PENW_2026.md;
-before that PEN_RECAL, PREREG_PEN.md).
+Per-plate-appearance home win probability for the look-back view: PENR_RECAL
+(60-day usage, five lead states, KAPPA 0.25; registered consequence of PREREG_PENR.md /
+RESULTS_PENR_2026.md; before that PENW_RECAL, PREREG_PENW.md, and PEN_RECAL, PREREG_PEN.md).
 
   python research/player_layer/build_pen_wp.py --states S --pen P
-      P = dir with size_pen_x.py --window 60 variant B outputs penB_w60_2022..2025.parquet (sizing)
-  (--tag penB --coef published/pen_recal_coef.json rebuilds the earlier PEN_RECAL files)
+      P = dir with size_pen_x2.py --window 60 --lead5 --kappa 0.25 outputs penB_w60_l5_k0_2022..2025.parquet
+  (--tag penB_w60 --coef published/penw_recal_coef.json rebuilds the PENW_RECAL files,
+   --tag penB --coef published/pen_recal_coef.json the PEN_RECAL ones)
   writes published/pen_wp_<season>.parquet (game_pk, at_bat_index, wp) for 2022-2026
 
 2022-2025: the sizing predictions (tables fitted on the other seasons of
@@ -34,8 +35,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--states", type=Path, required=True)
     ap.add_argument("--pen", type=Path, required=True)
-    ap.add_argument("--tag", default="penB_w60")
-    ap.add_argument("--coef", type=Path, default=HERE / "published/penw_recal_coef.json")
+    ap.add_argument("--tag", default="penB_w60_l5_k0")
+    ap.add_argument("--coef", type=Path, default=HERE / "published/penr_recal_coef.json")
     a = ap.parse_args()
     coef = json.loads(a.coef.read_text())
     cols = ["game_pk", "at_bat_index", "inning", "half", "outs", "scheduled_innings"]
