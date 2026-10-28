@@ -263,19 +263,42 @@ def usage_pick(t: dict, tl: list[dict], dec: dict, opts: dict | None) -> dict | 
     return {"player": p, "option": cands[p], "rank": ranked.index(cands[p]) + 1, "n": len(ranked)}
 
 
+def upto_for(t: dict, d: dict) -> int | None:
+    """The event index to rebuild the moment of call d at: its own index when a
+    substitution earlier in the same plate appearance came before it (e.g. a pinch
+    hitter sent up after a pitching change faces the new pitcher), else None =
+    the moment before the plate appearance. Same rule as the bench-call study."""
+    i = d.get("idx")
+    if i is None:
+        return None
+    if any(e.get("idx") is not None and e.get("player") and e["idx"] < i for e in t["decisions"]):
+        return i
+    return None
+
+
+def call_options(feed: dict, t: dict, d: dict, cache: dict, snapshot_path: str | None = "auto") -> dict | None:
+    """The bench options at the moment call d was made (cache: {upto: options})."""
+    u = upto_for(t, d)
+    if u not in cache:
+        got = moment_at(feed, t["k"], snapshot_path, upto_event=u)
+        cache[u] = BL.bench_options(feed, got=got) if got is not None else None
+    return cache[u]
+
+
 def game_review(feed: dict, series: list[dict] | None = None, snapshot_path: str | None = "auto") -> list[dict]:
     """Every call of the game (substitutions in the field excluded) with the
-    model's rating before the play and the WP swing over the play.
-    `series`: bench_viz.wp_series(feed) (home WP before play i at index i)."""
+    model's rating at the moment it was made (after any earlier substitution in
+    the same plate appearance) and the WP swing over the play.
+    `series`: home WP before play i at index i (the look-back passes PEN_RECAL)."""
     tl = timeline(feed)
     rows = []
     for t in tl:
         decs = [d for d in t["decisions"] if d["type"] != "defense"]
         if not decs:
             continue
-        got = moment_at(feed, t["k"], snapshot_path)
-        opts = BL.bench_options(feed, got=got) if got is not None else None
+        cache: dict = {}
         for d in decs:
+            opts = call_options(feed, t, d, cache, snapshot_path)
             side = deciding_side(t, d)
             r = rate(d, opts) if opts else None
             sw = None
@@ -285,7 +308,7 @@ def game_review(feed: dict, series: list[dict] | None = None, snapshot_path: str
             rows.append({"k": t["k"], "inning": t["inning"], "top_bottom": t["top_bottom"], "outs": t["outs"],
                          "runners": t["runners"], "side": side, "type": d["type"], "text": d.get("text", ""),
                          "rating": r, "swing": sw, "event": t["event"], "usage": usage_pick(t, tl, d, opts),
-                         "player": d.get("player")})
+                         "player": d.get("player"), "upto": upto_for(t, d)})
     return rows
 
 

@@ -50,6 +50,7 @@ TXT = {
            "miss_row": "{inn}　{team}：{opt}　{g:+.1f} ポイント",
            "miss_note": "継投は 7 回以降のみ（それより前は大きく出すぎるため）。盗塁は「走れ」の判定のときだけ。",
            "pen_note": "選手・終盤の継投の使い方込みの勝率（2026 年で事前登録して検証済み）",
+           "after_sub": "この打席で先にあった交代のあとの状況で評価",
            "usage": "普段の起用パターンなら {p}（モデルの順位 {r}/{n}）", "usage_same": "普段の起用パターンどおり（モデルの順位 {r}/{n}）",
            "usage_note": "起用パターン＝そのチームが直近 30 日、この回・この点差でいちばん多く使った投手（使える投手のうち）。2026 年の検証では、監督の選択との一致はモデルの最善候補より高めでした（28.7% と 20.1%）。",
            "find": "探し方", "finds": ["📅 日付から", "⚾ チームから"], "team": "チーム", "season": "年",
@@ -78,6 +79,7 @@ TXT = {
            "miss_row": "{inn}  {team}: {opt}  {g:+.1f} pt",
            "miss_note": "Pitching changes from the 7th inning only (earlier ones are overstated). Steals only when the call is 'go'.",
            "pen_note": "WP with players and late-inning bullpen usage (pre-registered, checked on 2026)",
+           "after_sub": "rated after the earlier substitution in this plate appearance",
            "usage": "Usage pattern: {p} (model rank {r}/{n})", "usage_same": "Matches the usage pattern (model rank {r}/{n})",
            "usage_note": "Usage pick = the available reliever the team used most over the last 30 days in this inning and score state. In the 2026 check it matched managers more often than the model's best (28.7% vs 20.1%).",
            "find": "Find by", "finds": ["📅 Date", "⚾ Team"], "team": "Team", "season": "Season",
@@ -139,17 +141,31 @@ def key_moments(tl: list[dict], series: list[dict], n: int = 5) -> list[tuple[in
     return sorted(top)
 
 
-def _moment(pk: int, k: int):
+def _moment(pk: int, k: int, upto: int | None = None):
+    """Options (and matchups) before plate appearance k, or at event `upto` of it
+    (a call made after an earlier substitution in the same plate appearance)."""
     key = ("review", pk, k)
     if st.session_state.get("review_cache_key") != key:
+        st.session_state["review_cache"] = {}
+        st.session_state["review_cache_key"] = key
+    cache = st.session_state["review_cache"]
+    if upto not in cache:
         feed = _feed(pk)
-        got = bench_replay.moment_at(feed, k)
+        got = bench_replay.moment_at(feed, k, upto_event=upto)
         out = None
         if got is not None:
             out = {"options": bench_live.bench_options(feed, got=got), "matchups": bench_live.matchups(feed, got=got)}
-        st.session_state["review_cache"] = out
-        st.session_state["review_cache_key"] = key
-    return st.session_state["review_cache"]
+        cache[upto] = out
+    return cache[upto]
+
+
+def _series(pk: int, feed: dict, tl: list[dict]) -> list[dict]:
+    """Home WP before each plate appearance: PEN_RECAL where available (regular
+    season 2022-2026), the team layer elsewhere. The card, the chart, the key
+    moments and the game summary all use this one series."""
+    series = bench_viz.wp_series(feed)
+    pw = pen_wp.game(pk, tl[0].get("game_date")) if tl and tl[0].get("game_type") == "R" else {}
+    return pen_wp.apply_to_series(series, [t.get("at_bat_index") for t in tl], pw)[0]
 
 
 def _rate(dec: dict, opts: dict, lang: str, x: dict) -> str:
@@ -183,7 +199,7 @@ def _inn(t: dict, lang: str) -> str:
 @st.cache_data(show_spinner=False, max_entries=8)
 def _review(pk: int) -> list[dict]:
     feed = _feed(pk)
-    rows = bench_replay.game_review(feed, bench_viz.wp_series(feed))
+    rows = bench_replay.game_review(feed, _series(pk, feed, bench_replay.timeline(feed)))
     for r in rows:                                     # keep only what the screen needs (cacheable, small)
         rt = r["rating"]
         if rt:
@@ -337,9 +353,8 @@ def render(lang: str) -> None:
         _summary(lang, pk, feed, x)
         return
     k = st.session_state.get("review_k", 0)
-    series = bench_viz.wp_series(feed)
+    series = _series(pk, feed, tl)
     pw = pen_wp.game(pk, tl[0].get("game_date")) if tl[0].get("game_type") == "R" else {}
-    series, n_pen = pen_wp.apply_to_series(series, [t_.get("at_bat_index") for t_ in tl], pw)
     # navigation
     b1, b2, b3, b4 = st.columns([1, 1, 1, 3])
     if b1.button(x["prev"], key="review_prev", width="stretch") and k > 0:
@@ -396,8 +411,12 @@ def render(lang: str) -> None:
     for d in t["decisions"]:
         if d["type"] == "defense":
             continue
-        rate = _rate(d, opts, lang, x) if opts else ""
-        up = bench_replay.usage_pick(t, tl, d, opts) if d["type"] == "pitch_change" else None
+        u = bench_replay.upto_for(t, d)
+        o_d = opts if u is None else (_moment(pk, k, u) or {}).get("options")
+        rate = _rate(d, o_d, lang, x) if o_d else ""
+        if u is not None and o_d:
+            rate += "（" + x["after_sub"] + "）" if lang == "JA" else f" ({x['after_sub']})"
+        up = bench_replay.usage_pick(t, tl, d, o_d) if d["type"] == "pitch_change" else None
         if up:
             rate += "　／　" + (x["usage_same"].format(r=up["rank"], n=up["n"]) if up["player"] == d.get("player")
                                else x["usage"].format(p=_short(up["option"], lang == "JA"), r=up["rank"], n=up["n"]))
