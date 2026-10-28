@@ -34,7 +34,7 @@ T = {
            "options": "作戦", "off": "攻撃側", "def": "守備側", "opt": "選択肢", "runs": "この回の得点期待値",
            "score": "1点以上", "owp": "攻撃側の勝率", "delta": "差（ポイント）",
            "note": "勝率の見出しはエンジン＋チーム補正、「選手込み」と作戦の値は選手を入れた層（事前登録して 2026 年で確認）。"
-                   "選手の成績は {d} まで。守備固めは考えていません。7 回以降の救援は、2022〜2026 年の試合ではそのチームの直近 30 日の起用から、それ以外はブルペン全体の平均で計算しています。"},
+                   "選手の成績は {d} まで。守備固めは考えていません。7 回以降の救援は、2022〜2026 年の試合ではそのチームの直近 60 日の起用から、それ以外はブルペン全体の平均で計算しています。"},
     "EN": {"title": "📋 Bench", "pick": "Game", "none": "No games today.", "reload": "Reload schedule",
            "follow": "Follow (every 30 s)", "updated": "Updated {t} UTC", "failed": "Fetch failed (last success {t} UTC)",
            "top": "Top", "bot": "Bot", "outs": "out", "wp": "{team} win prob.", "player": "with players", "li": "Leverage",
@@ -44,7 +44,7 @@ T = {
            "score": "P(score)", "owp": "Offense WP", "delta": "Change (pt)",
            "note": "Headline WP: engine + team layer; 'with players' and the options: the player layer (pre-registered, "
                    "confirmed on 2026). Player records through {d}. Defensive subs are not modelled. Relief from the 7th: the team's "
-                   "usage over the last 30 days for 2022-2026 games, otherwise the pooled bullpen."},
+                   "usage over the last 60 days for 2022-2026 games, otherwise the pooled bullpen."},
 }
 
 
@@ -118,8 +118,8 @@ def _plan_html(plan: list, lang: str, s: dict) -> str:
     """Who the model expects to pitch the late innings for the fielding team."""
     ja = lang == "JA"
     fld = s["home_team"] if s["top_bottom"] == "top" else s["away_team"]
-    head = (f"終盤の継投の見込み（守備側 {fld}：直近 30 日の起用と今の点差から。今の投手を除く）" if ja else
-            f"Expected late-inning arms for {fld} (usage over the last 30 days at the current score; current pitcher excluded)")
+    head = (f"終盤の継投の見込み（守備側 {fld}：直近 60 日の起用と今の点差から。今の投手を除く）" if ja else
+            f"Expected late-inning arms for {fld} (usage over the last 60 days at the current score; current pitcher excluded)")
     lines = []
     for r in plan:
         parts = [f"{html.escape(n)} <b>{x:.0%}</b>" for n, x in r["rows"]]

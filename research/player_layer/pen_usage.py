@@ -28,6 +28,7 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 PUB = HERE / "published"
 WINDOW_DAYS, TAU, KAPPA = 30, 20.0, 30.0
+BENCH_WINDOW_DAYS = 60   # the bench options' bullpen mixture (PREREG_PENW, H1 supported); the usage-pattern pick keeps 30
 
 
 def lead_state(lead: int) -> int:
@@ -52,11 +53,11 @@ def available(season: int) -> bool:
     return _load(season) is not None
 
 
-def usage(team: int, day: Date, season: int | None = None) -> dict:
+def usage(team: int, day: Date, season: int | None = None, window: int = WINDOW_DAYS) -> dict:
     got = _load(season or day.year)
     if got is None:
         return {}
-    lo = day - timedelta(days=WINDOW_DAYS)
+    lo = day - timedelta(days=window)
     u = {}
     for d, pid, ii, ls, n in got[0].get(int(team), []):
         if lo <= d < day:

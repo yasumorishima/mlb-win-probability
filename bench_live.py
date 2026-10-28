@@ -140,7 +140,7 @@ def moment_from_feed(feed: dict) -> tuple[B.Moment, B.Data, dict] | None:
 
 
 def pen_usage_for(gd: dict, team, bullpen) -> dict | None:
-    """Available relievers' late-inning usage over the 30 days before the
+    """Available relievers' late-inning usage over the 60 days before the
     game (pen_usage.py); None when there is no usage table for the season
     (e.g. a live game after the last published season): pooled bullpen."""
     day = str(gd.get("datetime", {}).get("officialDate") or "")
@@ -149,7 +149,7 @@ def pen_usage_for(gd: dict, team, bullpen) -> dict | None:
     d = date.fromisoformat(day[:10])
     if not PU.available(d.year):
         return None
-    u, tired = PU.usage(int(team), d), PU.tired(int(team), d)
+    u, tired = PU.usage(int(team), d, window=PU.BENCH_WINDOW_DAYS), PU.tired(int(team), d)
     roster = {int(i) for i in bullpen or []}
     return {p: v for p, v in u.items() if p not in tired and (not roster or p in roster)}
 

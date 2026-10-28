@@ -2,7 +2,7 @@
 published JSON files, never typed by hand).
 
   pip install matplotlib pillow
-  python docs/make_gifs.py          ->  docs/images/{engine_2026,team_layer,player_layer,blend,steal_claude,pen_recal}.gif
+  python docs/make_gifs.py          ->  docs/images/{engine_2026,team_layer,player_layer,blend,steal_claude,pen_recal,penw}.gif
 
 The Claude bench-call figure is made by research/bench_claude/make_gif.py.
 """
@@ -300,7 +300,31 @@ def pen_recal() -> None:
     save("pen_recal", draw)
 
 
+def penw() -> None:
+    r = J("research/player_layer/published/results_penw_2026.json")
+    a, t, s = r["arms"], r["tests"], r["supported"]
+    rows_b = [("チーム補正層", a["TEAM"]["brier"] * 1000, AQUA, False),
+              ("継投の起用を直近30日で数える層", a["PEN_RECAL"]["brier"] * 1000, YELLOW, False),
+              ("直近60日で数える層（新）", a["PENW_RECAL"]["brier"] * 1000, BLUE, True)]
+    v = lambda k: "支持" if s[k] else "支持されず"  # noqa: E731
+    k1 = "H1_PENW_RECAL_minus_PEN_RECAL"
+    rows_i = [("仮説1  60日 - 30日", t[k1]["mean"], t[k1]["ci95"], v(k1))]
+
+    def draw(g, h):
+        fig = new_fig("救援投手の起用を直近60日で数えると、2026年の勝率予測がわずかに良くなった",
+                      f"事前登録して1回だけ採点（{r['n_rows']:,}打席・{r['n_games']:,}試合）。左：Brier×1000（小さいほど良い）、右：差×1000と95%区間")
+        ax = fig.add_axes([0.30, 0.15, 0.28, 0.62])
+        bars(ax, rows_b, g, "{:.3f}", 157.2, 154.5)
+        ax.set_xlabel("Brier × 1000（154.5 から表示）", color=INK2, fontsize=9.5)
+        bx = fig.add_axes([0.65, 0.15, 0.33, 0.62])
+        intervals(bx, rows_i, h, 1000, "", (-0.2, 0.05))
+        bx.set_xlabel("Brier の差 × 1000（負＝60日のほうが当たる）", color=INK2, fontsize=9.5)
+        return to_image(fig)
+
+    save("penw", draw)
+
+
 if __name__ == "__main__":
     IMG.mkdir(parents=True, exist_ok=True)
-    for fn in (engine_2026, team_layer, player_layer, blend, steal_claude, pen_recal):
+    for fn in (engine_2026, team_layer, player_layer, blend, steal_claude, pen_recal, penw):
         fn()
