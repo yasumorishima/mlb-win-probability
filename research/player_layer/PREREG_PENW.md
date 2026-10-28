@@ -25,17 +25,29 @@ This test asks whether the 60-day window improves the look-back win probability 
 2026 has been read for this repository's earlier tests (engine, team layer, steal study, player layer
 v1, BLEND, bench-call study, PEN_RECAL). In particular the PEN_RECAL result on 2026 is known:
 Brier 0.155063, vs TEAM −0.00173 (−0.00262 to −0.00076), vs PLAYER −0.00170, band gap +0.64 pt
-(`published/results_pen_2026.json`). Its predictions are the comparison arm here, unchanged. Nothing
-about the usage window was looked at on 2026 (no 2026 prediction of the 60-day layer has been compared
-with an outcome).
+(`published/results_pen_2026.json`). Its predictions are the comparison arm here, unchanged; its
+per-play 2026 values are published (`pen_2026.parquet`, `pen_wp_2026.parquet`) and the look-back view
+has shown them next to 2026 game results for single games. No 2026 prediction with any window other
+than 30 days has been made or compared with an outcome.
+Also known: the bench-call study found on 2026 that the 30-day usage rule matched managers' reliever
+choices better than the model's best reliever (28.7% vs 20.1%, `research/bench_claude/RESULTS.md`).
+Selection on 2022-2025: six candidates have been sized against PEN_RECAL (usage from the 4th inning,
+two times-through-the-order forms, pitch count, 60 days, 120 days); 60 was picked over 120 on a mean
+difference of about 0.000009, and the same seasons fitted the recalibration.
 
 ## Model (frozen)
 - 2026 predictions: `size_pen_x.py --season 2026 --variant B --window 60 --load-seasons
   2021,2022,2023,2024,2025,2026 --part K/4` (K = 0..3), stored as
-  `published/penBw60_2026_part{K}.parquet` (frozen below). Everything else as PEN_RECAL's 2026
+  `published/penB_w60_2026_part{K}.parquet` (frozen below). Everything else as PEN_RECAL's 2026
   predictions (tables fitted on 2021-2025, records / usage / rest from earlier dates only, usage within
   2026, same park rule). `size_pen_x.py` without options gives the same predictions as the frozen
-  `size_pen.py` (gate: 2022 40-game file, max difference 0).
+  `size_pen.py` (gate, re-run on the version frozen below: the same 40 games of 2022, max difference 0 vs
+  frozen `size_pen.py`, 1.1e-16 vs the earlier file; and the 2026 path: `--season 2026 --load-seasons
+  2021,...,2026 --games 40` with the default window equals the matching rows of the frozen
+  `penB_2026_part*` files; results in "Gates" below).
+- What the window changes: only the usage counts (`usage_tables`); with 60 days the counts are about
+  twice as large, so the shrinkage toward the pooled bullpen (KAPPA 30) and the lead-state smoothing
+  (TAU 20) are weaker. Rest table, records, engine, starter table and park rule are unchanged.
 - Recalibration: `test_penw_2026.py fit` on the 2022-2025 out-of-fold sizing predictions of the 60-day
   layer (733,260 rows) → `published/penw_recal_coef.json`; same terms as PEN_RECAL (L, L·r, L·r², r, r²).
 - PENW_RECAL = sigmoid(design · coef) on the 2026 predictions (`test_penw_2026.py predict`); the score
@@ -45,9 +57,11 @@ with an outcome).
   (95% −0.000165 to −0.000066).
 
 ## Arms and hypotheses (2026, 184,327 plate appearances, one run)
-- H1: Brier(PENW_RECAL) < Brier(PEN_RECAL) (`p_PEN_RECAL` of `published/pen_2026.parquet`, frozen in
-  PREREG_PEN).
+- H1: Brier(PENW_RECAL) < Brier(PEN_RECAL) (`p_PEN_RECAL` of `published/pen_2026.parquet`, the file
+  scored in PREREG_PEN: md5 equal to `pred_md5` in `results_pen_2026.json`, checked by the score step,
+  and frozen below).
 - H2: Brier(PENW_RECAL) < Brier(TEAM) (`p_TEAM`, `research/wp_layer/published/pred_2026.parquet`).
+  A consistency check, not new evidence: PEN_RECAL − TEAM on 2026 is known (−0.00173).
 One-sided, game bootstrap (2,000 resamples, seed 20261030, `test_pen_2026.run_tests`),
 p = (1 + #{resampled difference ≥ 0}) / 2001, Holm over the two, supported if the adjusted p ≤ 0.05.
 Brier on unclipped probabilities.
@@ -58,16 +72,22 @@ Reported, not tested: log loss and the 0.3-0.5 band gap of PENW_RECAL, PEN_RECAL
 recalibrated).
 
 ## Run
-`test_penw_2026.py predict` (no outcome read), then `score` once. The score step requires
+`test_penw_2026.py predict --out research/player_layer/published` (no outcome read), then
+`score --out research/player_layer/published` once. The score step requires
 Status: FROZEN and checks every md5 below and the input data md5s (pa / pitch 2021-2026,
 park_factors, via `test_pen_2026.check_inputs`).
 Outputs `published/penw_2026.parquet`, `published/results_penw_2026.json`, `RESULTS_PENW_2026.md`.
 
 ## What follows
-- H1 supported → the look-back view's win probability becomes PENW_RECAL (2022-2026 games; the
+- H1 supported → the look-back view's win probability series becomes PENW_RECAL (2022-2026 games; the
   2022-2025 values from the sizing predictions recalibrated with `penw_recal_coef.json`, as
-  `build_pen_wp.py` did for PEN_RECAL), and the bench's usage tables use 60 days.
+  `build_pen_wp.py` did for PEN_RECAL), and the bullpen mixture inside the bench options uses 60-day
+  usage. The 「起用パターン」 pick (`bench_replay.usage_pick`, the bench-call study's rule) stays at
+  30 days: nothing here tests a 60-day pick.
 - H1 not supported → PEN_RECAL stays; the numbers are published either way.
+
+## Gates (run before the freeze)
+(filled before the freeze)
 
 ## Frozen files (md5)
 (filled at the freeze)

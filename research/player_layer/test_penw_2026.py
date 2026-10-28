@@ -12,7 +12,7 @@ published 2026 prediction (published/pen_2026.parquet, PREREG_PEN.md).
   dry      : python test_penw_2026.py dry --states S --pen P --pen30 P30
              (rehearsal on 2025: both layers recalibrated on 2022-2024, scored on 2025; no 2026 read)
   predict  : python test_penw_2026.py predict --states S --hf HF --out W
-             (reads published/penBw60_2026_part{0..3}.parquet; no outcome read)
+             (reads published/penB_w60_2026_part{0..3}.parquet; no outcome read)
   score    : python test_penw_2026.py score --states S --hf HF --out W   (once; needs Status: FROZEN)
 
 2026 predictions: size_pen_x.py --season 2026 --variant B --window 60
@@ -40,7 +40,8 @@ from test_pen_2026 import N_2026, TERMS, check_inputs, run_tests, sizing_rows, w
 COEF = HERE / "published/penw_recal_coef.json"
 PEN_FILE = HERE / "published/pen_2026.parquet"            # frozen PEN_RECAL 2026 predictions (PREREG_PEN)
 TEAM_FILE = ROOT / "research/wp_layer/published/pred_2026.parquet"
-PENW26_FILES = [HERE / f"published/penBw60_2026_part{k}.parquet" for k in range(4)]
+PENW26_FILES = [HERE / f"published/penB_w60_2026_part{k}.parquet" for k in range(4)]
+PEN_RESULTS = HERE / "published/results_pen_2026.json"     # its pred_md5 pins PEN_FILE
 PREREG = HERE / "PREREG_PENW.md"
 
 
@@ -149,10 +150,13 @@ def cmd_score(a) -> None:
     d = pd.read_parquet(a.out / "penw_2026.parquet")
     res["pred_md5"] = md5(a.out / "penw_2026.parquet")
     res["part_md5"] = {f.name: md5(f) for f in PENW26_FILES}
+    if md5(PEN_FILE) != json.loads(PEN_RESULTS.read_text())["pred_md5"]:
+        sys.exit("pen_2026.parquet is not the file scored in PREREG_PEN")
     again = penw_2026_rows()          # the predictions must come from the frozen parts and coefficients
     if not (again[["game_pk", "at_bat_index"]].equals(d[["game_pk", "at_bat_index"]])
             and np.array_equal(again.p_PENW_RECAL.to_numpy(), d.p_PENW_RECAL.to_numpy())
-            and np.array_equal(again.p_PEN_RECAL.to_numpy(), d.p_PEN_RECAL.to_numpy())):
+            and np.array_equal(again.p_PEN_RECAL.to_numpy(), d.p_PEN_RECAL.to_numpy())
+            and np.array_equal(again.wp_penw.to_numpy(), d.wp_penw.to_numpy())):
         sys.exit("penw_2026.parquet does not equal the frozen parts + coefficients")
     d = d.merge(pd.read_parquet(TEAM_FILE, columns=["game_pk", "at_bat_index", "p_TEAM"]), on=["game_pk", "at_bat_index"], how="left")
     y_tab = pd.read_parquet(a.states / "pa_2026.parquet", columns=["game_pk", "at_bat_index", "home_won"])
