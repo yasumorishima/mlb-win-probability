@@ -232,6 +232,37 @@ def rate(dec: dict, opts: dict) -> dict | None:
             "call": None}
 
 
+def usage_pick(t: dict, tl: list[dict], dec: dict, opts: dict | None) -> dict | None:
+    """For a pitching change from the 6th inning: the available reliever the fielding
+    team used most over the previous 30 days in that inning and lead state (the lead
+    when the half began), among the model's candidates (the bench-call study's USAGE
+    rule: innings 6 and 10+ use innings 7-9 together; ties: lowest id). Returns
+    {player, option, rank, n} (rank among the candidates by the model) or None."""
+    from datetime import date as _date
+    if dec.get("type") != "pitch_change" or not opts or t.get("inning", 0) < 6 or not t.get("game_date"):
+        return None
+    cands = {int(o["option"].split(":")[1]): o for o in opts["all"] if o["kind"] == "pitch_change"}
+    if not cands:
+        return None
+    side = deciding_side(t, dec)
+    team = t.get("home_id") if side == "home" else t.get("away_id")
+    if team is None:
+        return None
+    first = next(j for j, q in enumerate(tl) if q["inning"] == t["inning"] and q["top_bottom"] == t["top_bottom"])
+    h0, a0 = (tl[first - 1]["home_score"], tl[first - 1]["away_score"]) if first else (0, 0)
+    lead = (h0 - a0) if side == "home" else (a0 - h0)
+    u = BL.PU.usage(int(team), _date.fromisoformat(str(t["game_date"])[:10]))
+    av = {p: u[p] for p in cands if p in u}
+    W, _ = BL.PU.weights(av, list(av), "B")
+    ii = 3 if (t["inning"] >= 10 or t["inning"] == 6) else t["inning"] - 7
+    w = W.get((ii, BL.PU.lead_state(int(lead))), {})
+    if not w:
+        return None
+    p = max(sorted(w), key=w.get)
+    ranked = sorted(cands.values(), key=lambda o: o["wp_offense"])        # fielding team: lower opponent WP is better
+    return {"player": p, "option": cands[p], "rank": ranked.index(cands[p]) + 1, "n": len(ranked)}
+
+
 def game_review(feed: dict, series: list[dict] | None = None, snapshot_path: str | None = "auto") -> list[dict]:
     """Every call of the game (substitutions in the field excluded) with the
     model's rating before the play and the WP swing over the play.
@@ -253,7 +284,8 @@ def game_review(feed: dict, series: list[dict] | None = None, snapshot_path: str
                 sw = 100 * ((b - a) if side == "home" else (a - b))
             rows.append({"k": t["k"], "inning": t["inning"], "top_bottom": t["top_bottom"], "outs": t["outs"],
                          "runners": t["runners"], "side": side, "type": d["type"], "text": d.get("text", ""),
-                         "rating": r, "swing": sw, "event": t["event"]})
+                         "rating": r, "swing": sw, "event": t["event"], "usage": usage_pick(t, tl, d, opts),
+                         "player": d.get("player")})
     return rows
 
 
