@@ -1,6 +1,10 @@
 # Pre-registration: PENW_RECAL (PEN_RECAL with a 60-day reliever usage window) on 2026
 
-Status: DRAFT (not frozen; nothing has been scored).
+Status: FROZEN (2026-10-28, cloud). Nothing below changes after the commit that set this line, except
+in a dated AMENDMENTS section written before the score step is run. Independent review before the
+freeze (read-only subagent, no 2026 outcome read): blocking points fixed — the comparison file
+`pen_2026.parquet` pinned by md5 (checked against `results_pen_2026.json` at scoring), 2026 part file
+names; suggestions taken: 2026-path gate, `wp_penw` recompute check, disclosures, narrower consequences.
 
 ## Why
 PEN_RECAL (player layer + late-inning bullpen by usage, recalibrated; `PREREG_PEN.md`) is the look-back
@@ -87,10 +91,47 @@ Outputs `published/penw_2026.parquet`, `published/results_penw_2026.json`, `RESU
 - H1 not supported → PEN_RECAL stays; the numbers are published either way.
 
 ## Gates (run before the freeze)
-(filled before the freeze)
+- `size_pen_x.py` (this version) without options vs frozen `size_pen.py`, 2022, 40 games: max difference 0
+  (1.1e-16 vs the earlier file `penB_2022_g40`).
+- 2026 path: `size_pen_x.py --season 2026 --variant B --load-seasons 2021,...,2026 --games 40` (30 days)
+  vs the frozen `penB_2026_part*`: 3,092 rows, max difference 0.
+- `dry` on 2025: PENW_RECAL 0.152524, PEN_RECAL 0.152641, −0.000117 (95% −0.000165 to −0.000066).
+- `predict` written to `published/penw_2026.parquet` (184,327 rows, no outcome read).
 
 ## Frozen files (md5)
-(filled at the freeze)
+45a794a88aded87976ec4f5567f2be1d  research/player_layer/test_penw_2026.py
+0d61f77c584cc7ef414c9c198aa9e7ec  research/player_layer/test_pen_2026.py
+a71518eba9ad596861857508619bc270  research/player_layer/size_stack.py
+b979748de5cd4e160981485454a08dd7  research/wp_layer/layer_features.py
+9873dd9c9e0144a71d7c676c1b9940b8  research/player_layer/size_pen_x.py
+d2170512c0acc37b918cdb4ce4b59d25  research/player_layer/size_pen.py
+43ddb22adead3c254fb8d488267bd374  research/player_layer/starter_pc.py
+6883dd4c9f13b64f0073e06923595312  research/player_layer/game.py
+49a5462584d4a3b546f14dd01d996c47  research/player_layer/game_pen.py
+24cd633fdb951a6a5a195cf7f17ec149  research/player_layer/layer.py
+6ec9535345c1098f069babaf15160269  research/player_layer/pa_rates.py
+033bb61b84531f594545611cc45d24a9  research/player_layer/size_context.py
+d9a6d77695ed33e4f0bf41ec9d945ccf  research/player_layer/size_game.py
+1a5097807220a8b0186ebe85252694ca  research/player_layer/size_game2.py
+99446952547af94e88220d61a0acf272  research/player_layer/size_hand.py
+14e0b9a891fb36a6b7e6ed61f194ea84  research/player_layer/rates_v2.py
+4681783920315619f4a4b58abffe712d  research/player_layer/size_pa.py
+ca649a877f4e83d894970372fd2c596a  research/player_layer/size_runs.py
+f8e0379dc4ef5e146fb02f3633ac60ae  research/player_layer/size_vs_pen.py
+12972ac8bb23a2dc8c152c07cbfd7a56  wp_engine.py
+4d218e568a0deb7af0272192eb847815  research/player_layer/published/penw_recal_coef.json
+8257406c8c65d2e2c4349a6debf6fdf5  research/player_layer/published/size_vs_pen_w60.json
+6524aac83fb642d0f9da5d4d0ee2d753  research/player_layer/published/size_vs_pen_w120.json
+b62ca366ecd9ef80827587317982aa96  research/player_layer/published/size_vs_pen_placebo.json
+9e298fd60cbdc9d8b50c269766bb9364  research/player_layer/published/size_vs_pen_pooled.json
+dfc422d5dfd570a61ab02175874a79ab  research/player_layer/published/penB_w60_2026_part0.parquet
+6faff0296673b7e1dea46f5c6f8b7192  research/player_layer/published/penB_w60_2026_part1.parquet
+56c1728c7dd54497ec96004f1b2668f7  research/player_layer/published/penB_w60_2026_part2.parquet
+dfc03a5860116868493d9eb65d9211df  research/player_layer/published/penB_w60_2026_part3.parquet
+44a1af9d14fa053e8db177a0f048c0ac  research/player_layer/published/penw_2026.parquet
+59c936efd04621678a0734f3cf3bb22d  research/player_layer/published/pen_2026.parquet
+3383e06af583d8869132e765233f39d5  research/player_layer/published/results_pen_2026.json
+c9e35870ab157190d2d81b1f26b23b87  research/wp_layer/published/pred_2026.parquet
 
 ## AMENDMENTS
 (none)
