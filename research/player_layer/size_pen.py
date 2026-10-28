@@ -56,6 +56,7 @@ C = R.PA_CLASSES
 WINDOW_DAYS, TAU, KAPPA = 30, 20.0, 30.0
 LATE = (7, 8, 9)
 TTO = None         # (5, 7) class factors by the starter's time through the order (1, 2, 3, 4+) and relief (CLI --tto)
+TTO_ADVANCE = True  # False: later halves keep the current group (CLI --tto-now-only)
 BF_PER_HALF = 4.3  # batters per half-inning, to place a starter's later innings in the order
 FIRST = 7          # first inning whose relievers come from usage (CLI --first-inning; 7 = the sized / tested layer)
 LEADS = ("behind", "tied", "close", "big")
@@ -231,7 +232,7 @@ def run_season(a) -> None:
 
         def later_g(g0, halves_ahead):
             """The starter's group in a later half (expected batters faced)."""
-            if g0 is None or g0 == 4:
+            if g0 is None or g0 == 4 or not TTO_ADVANCE:
                 return g0
             return min(3, int((9 * g0 + 4 + BF_PER_HALF * halves_ahead) // 9))
         other = "bottom" if half == "top" else "top"
@@ -305,7 +306,7 @@ def run_season(a) -> None:
     for v in variants:
         d["wp_new"] = outs[v]
         d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(
-            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{'_tto' if TTO is not None else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
+            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
 
@@ -357,11 +358,13 @@ def main() -> None:
     ap.add_argument("--load-seasons", type=lambda x: [int(v) for v in x.split(",")],
                     help="seasons to load (default 2021-2025); e.g. 2021,...,2026 to predict 2026 with tables fitted on the others")
     ap.add_argument("--tto", type=Path, help="size_tto.py output: class factors by time through the order")
+    ap.add_argument("--tto-now-only", action="store_true", help="later halves keep the starter's current group")
     ap.add_argument("--tto-key", help="which fold of factors_by_fold (the scored season, fitted on the others)")
     ap.add_argument("--first-inning", type=int, default=7,
                     help="first inning whose relievers come from usage (default 7 = the tested layer)")
     a = ap.parse_args()
-    global FIRST, TTO
+    global FIRST, TTO, TTO_ADVANCE
+    TTO_ADVANCE = not a.tto_now_only
     FIRST = a.first_inning
     if a.tto:
         TTO = np.asarray(json.loads(a.tto.read_text())["factors_by_fold"][a.tto_key], float)
