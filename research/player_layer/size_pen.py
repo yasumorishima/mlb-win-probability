@@ -55,6 +55,8 @@ SCORE = [2022, 2023, 2024, 2025]
 C = R.PA_CLASSES
 WINDOW_DAYS, TAU, KAPPA = 30, 20.0, 30.0
 LATE = (7, 8, 9)
+TTO = None         # (5, 7) class factors by the starter's time through the order (1, 2, 3, 4+) and relief (CLI --tto)
+BF_PER_HALF = 4.3  # batters per half-inning, to place a starter's later innings in the order
 FIRST = 7          # first inning whose relievers come from usage (CLI --first-inning; 7 = the sized / tested layer)
 LEADS = ("behind", "tied", "close", "big")
 NEW_PARKS = {2025: ("OAK", "TB"), 2026: ("OAK", "TB")}   # park factor = average (venue not in the 3-year window), as test_2026.py
@@ -185,6 +187,9 @@ def run_season(a) -> None:
     d["used_f"], d["used_b"] = used_before(d)
     d["bf_b"] = [bf_bucket(x) for x in d.bf_before]
     d["ybf_b"] = [bf_bucket(x) for x in d.bat_pitcher_bf]
+    tg = lambda bf: min(int(bf) // 9, 3)
+    d["tto_g"] = [tg(b) if c else 4 for b, c in zip(d.bf_before, d.cur_is_starter)] if TTO is not None else 0
+    d["ytto_g"] = [tg(b) if c else 4 for b, c in zip(d.bat_pitcher_bf, d.bat_pitcher_is_starter)] if TTO is not None else 0
     d["abs_lineup"] = [tuple(np.roll(row, sl)) for row, sl in
                        zip(d[[f"next{k}" for k in range(9)]].to_numpy(), d.slot.to_numpy())]
     zero_bip = np.zeros(len(R.BIP)); zeros = np.zeros(len(C))
@@ -197,12 +202,16 @@ def run_season(a) -> None:
     outs = {v: np.empty(len(d)) for v in variants}
     keys = ["game_pk", "inning", "half", "pitcher", "abs_lineup", "fld_lineup", "fld_next", "bat_pitcher",
             "cur_is_starter", "bat_pitcher_is_starter", "bf_b", "ybf_b", "used_f", "used_b"]
+    if TTO is not None:
+        keys += ["tto_g", "ytto_g"]
     seg = d.groupby(keys, sort=False).indices
     col = {c: d[c].to_numpy() for c in ("sidx", "slot", "inning", "diff", "scheduled_innings", "date",
                                          "bat_team", "fld_team", "home_team")}
     n_seg, cache_g, cache = 0, None, {}
     for key, rows in seg.items():
-        g, inn, half, pitcher, bl, fl, fnext, bpitch, cur_st, bp_st, bfb, ybfb, used_f, used_b = key
+        g, inn, half, pitcher, bl, fl, fnext, bpitch, cur_st, bp_st, bfb, ybfb, used_f, used_b = key[:14]
+        g_now, yg_now = (key[14], key[15]) if TTO is not None else (None, None)
+        rel = 4 if TTO is not None else None
         if g != cache_g:
             cache_g, cache = g, {}
         r0 = rows[0]
@@ -211,16 +220,27 @@ def run_season(a) -> None:
         park = None if hab in NEW_PARKS.get(s, ()) else parks.get((hab, s))
         pen_f, pen_b = pen.get((ft, s, date), zeros), pen.get((bt, s, date), zeros)
 
-        def rd(h, ids, pid, pc, fld):
-            k = (h, ids, pid, fld)
+        def rd(h, ids, pid, pc, fld, gg=None):
+            k = (h, ids, pid, fld, gg)
             if k not in cache:
-                cache[k] = Ly.run_dist(ct, h, mult(ids, pc, fld, s, date, park))
+                m = mult(ids, pc, fld, s, date, park)
+                if gg is not None:
+                    m = m * TTO[gg][None, :]
+                cache[k] = Ly.run_dist(ct, h, m)
             return cache[k]
+
+        def later_g(g0, halves_ahead):
+            """The starter's group in a later half (expected batters faced)."""
+            if g0 is None or g0 == 4:
+                return g0
+            return min(3, int((9 * g0 + 4 + BF_PER_HALF * halves_ahead) // 9))
         other = "bottom" if half == "top" else "top"
-        dist_now = rd(half, bl, ("cur", pitcher), pit.get((pitcher, date), zeros), ft)
-        X_pen = rd(half, bl, "pool", pen_f, ft)
-        Y_vs_bp = rd(other, fl, ("cur", bpitch), pit.get((bpitch, date), zeros), bt)
-        Y_pen = rd(other, fl, "pool", pen_b, bt)
+        dist_now = rd(half, bl, ("cur", pitcher), pit.get((pitcher, date), zeros), ft, g_now)
+        X_pen = rd(half, bl, "pool", pen_f, ft, rel)
+        Y_vs_bp = rd(other, fl, ("cur", bpitch), pit.get((bpitch, date), zeros), bt, yg_now)
+        Y_pen = rd(other, fl, "pool", pen_b, bt, rel)
+        X_cur = lambda i2: dist_now if TTO is None else rd(half, bl, ("cur", pitcher), pit.get((pitcher, date), zeros), ft, later_g(g_now, i2 - inn))
+        Y_cur = lambda i2: Y_vs_bp if TTO is None else rd(other, fl, ("cur", bpitch), pit.get((bpitch, date), zeros), bt, later_g(yg_now, i2 - first_y[0]))
         first_y = (inn, "bottom") if half == "top" else (inn + 1, "top")
 
         def late(team, used, h, ids, fld_team_pen, slot_pick, variant):
@@ -228,7 +248,7 @@ def run_season(a) -> None:
             u = usage.get((team, date), {})
             avail = {p for p in u if p not in used and p not in tired.get((team, date), set())}
             W, tot = mixture_weights(u, avail, variant)
-            pool = rd(h, ids, "pool", fld_team_pen, team)
+            pool = rd(h, ids, "pool", fld_team_pen, team, rel)
             res = {}
             for (ii, ls), w in W.items():
                 pool_w = 1.0 if variant == "N" else KAPPA / (KAPPA + tot[ii])
@@ -238,7 +258,7 @@ def run_season(a) -> None:
                     if sw <= 0 or pool_w >= 1.0:
                         res[(ii, ls, st)] = base
                         continue
-                    mix = sum(x * slot_pick(rd(h, ids, ("rp", p), pit.get((p, date), zeros), team), st) for p, x in w.items()) / sw
+                    mix = sum(x * slot_pick(rd(h, ids, ("rp", p), pit.get((p, date), zeros), team, rel), st) for p, x in w.items()) / sw
                     res[(ii, ls, st)] = pool_w * base + (1 - pool_w) * mix
             return res
         avg = lambda dd, st: dd[:, st].mean(axis=0)
@@ -262,13 +282,13 @@ def run_season(a) -> None:
             if h2 == half:
                 q = qx[i2] if i2 < 13 else 0.0
                 pen_part = avg(X_pen, st) if i2 < FIRST else pen_dist(Xl, i2, h2, st)
-                return q * avg(dist_now, st) + (1 - q) * pen_part
+                return q * avg(X_cur(i2), st) + (1 - q) * pen_part
             q = qy[i2] if i2 < 13 else 0.0
             if (i2, h2) == first_y:
                 pen_part = nxt(Y_pen, st) if i2 < FIRST else pen_dist(Yl_first, i2, h2, st)
                 return q * nxt(Y_vs_bp, st) + (1 - q) * pen_part
             pen_part = avg(Y_pen, st) if i2 < FIRST else pen_dist(Yl_avg, i2, h2, st)
-            return q * avg(Y_vs_bp, st) + (1 - q) * pen_part
+            return q * avg(Y_cur(i2), st) + (1 - q) * pen_part
 
         for v in variants:
             Xl = late(ft, used_f, half, bl, pen_f, avg, v)
@@ -285,7 +305,7 @@ def run_season(a) -> None:
     for v in variants:
         d["wp_new"] = outs[v]
         d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(
-            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
+            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{'_tto' if TTO is not None else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
 
@@ -336,11 +356,16 @@ def main() -> None:
     ap.add_argument("--part", help="K/N: only games K, K+N, K+2N, ... of the season (parallel runs)")
     ap.add_argument("--load-seasons", type=lambda x: [int(v) for v in x.split(",")],
                     help="seasons to load (default 2021-2025); e.g. 2021,...,2026 to predict 2026 with tables fitted on the others")
+    ap.add_argument("--tto", type=Path, help="size_tto.py output: class factors by time through the order")
+    ap.add_argument("--tto-key", help="which fold of factors_by_fold (the scored season, fitted on the others)")
     ap.add_argument("--first-inning", type=int, default=7,
                     help="first inning whose relievers come from usage (default 7 = the tested layer)")
     a = ap.parse_args()
-    global FIRST
+    global FIRST, TTO
     FIRST = a.first_inning
+    if a.tto:
+        TTO = np.asarray(json.loads(a.tto.read_text())["factors_by_fold"][a.tto_key], float)
+        assert TTO.shape == (5, len(C))
     a.out.mkdir(parents=True, exist_ok=True)
     if a.season is None:
         summarize(a)
