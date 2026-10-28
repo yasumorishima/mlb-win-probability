@@ -55,6 +55,7 @@ SCORE = [2022, 2023, 2024, 2025]
 C = R.PA_CLASSES
 WINDOW_DAYS, TAU, KAPPA = 30, 20.0, 30.0
 LATE = (7, 8, 9)
+FIRST = 7          # first inning whose relievers come from usage (CLI --first-inning; 7 = the sized / tested layer)
 LEADS = ("behind", "tied", "close", "big")
 NEW_PARKS = {2025: ("OAK", "TB"), 2026: ("OAK", "TB")}   # park factor = average (venue not in the 3-year window), as test_2026.py
 S_EMPTY, S_RUNNER2 = G.S_EMPTY, G.S_RUNNER2
@@ -70,12 +71,12 @@ LEAD_OF_D = {sign: np.array([lead_state(int(sign * d)) for d in G.D]) for sign i
 def usage_tables(pa: pd.DataFrame) -> dict:
     """(team, date) -> {pitcher: array (3 innings, 4 lead states) of relief
     PAs over the previous WINDOW_DAYS days of the same season}."""
-    r = pa[pa.is_relief & pa.inning.isin(LATE)].copy()
+    r = pa[pa.is_relief & pa.inning.isin(range(FIRST, 10))].copy()
     first = pa.groupby(["game_pk", "half", "inning"], sort=False)[["home_score", "away_score"]].first()
     r = r.join(first.rename(columns={"home_score": "h0", "away_score": "a0"}), on=["game_pk", "half", "inning"])
     lead = np.where(r.half == "top", r.h0 - r.a0, r.a0 - r.h0)     # the fielding team's lead at the half's start
     r["ls"] = [lead_state(int(x)) for x in lead]
-    r["ii"] = r.inning - 7
+    r["ii"] = r.inning - FIRST
     daily = r.groupby(["fld_team", "season", "date", "pitcher", "ii", "ls"]).size().rename("n").reset_index()
     out = {}
     q = pa[["season", "date"]].drop_duplicates()
@@ -90,7 +91,7 @@ def usage_tables(pa: pd.DataFrame) -> dict:
             w = dd.iloc[lo:hi]
             u = {}
             for p, ii, ls, n in zip(w.pitcher, w.ii, w.ls, w.n):
-                u.setdefault(int(p), np.zeros((3, 4)))[ii, ls] += n
+                u.setdefault(int(p), np.zeros((10 - FIRST, 4)))[ii, ls] += n
             out[(t, dt)] = u
     return out
 
@@ -121,13 +122,18 @@ def used_before(pa: pd.DataFrame) -> tuple[list, list]:
     return used_f, used_b
 
 
-def mixture_weights(u: dict, avail: set, variant: str) -> tuple[dict, float]:
-    """{(inning index 0-2 or 3 = extra innings, lead state): {pitcher: weight}}
-    and the usage PAs of the available relievers (for the pool weight)."""
+def mixture_weights(u: dict, avail: set, variant: str) -> tuple[dict, dict]:
+    """{(inning index 0..9-FIRST, or 10-FIRST = extra innings, lead state): {pitcher: weight}}
+    and, per inning index, the usage PAs of the available relievers (for the pool
+    weight): innings 7-9 and extra innings use the 7-9 rows (as before), earlier
+    innings the rows of innings FIRST-6."""
     W = {}
-    tot = float(sum(u[p].sum() for p in avail))
-    for ii in range(4):
-        rows = {p: (u[p] if ii == 3 else u[p][ii:ii + 1]) for p in avail}
+    ex, k7 = 10 - FIRST, 7 - FIRST
+    tot_late = float(sum(u[p][k7:].sum() for p in avail))
+    tot_mid = float(sum(u[p][:k7].sum() for p in avail))
+    tot = {ii: (tot_late if ii >= k7 else tot_mid) for ii in range(ex + 1)}
+    for ii in range(ex + 1):
+        rows = {p: (u[p][k7:] if ii == ex else u[p][ii:ii + 1]) for p in avail}
         tot_i = sum(x.sum() for x in rows.values())
         for ls in range(4):
             w = {}
@@ -222,10 +228,10 @@ def run_season(a) -> None:
             u = usage.get((team, date), {})
             avail = {p for p in u if p not in used and p not in tired.get((team, date), set())}
             W, tot = mixture_weights(u, avail, variant)
-            pool_w = 1.0 if variant == "N" else KAPPA / (KAPPA + tot)
             pool = rd(h, ids, "pool", fld_team_pen, team)
             res = {}
             for (ii, ls), w in W.items():
+                pool_w = 1.0 if variant == "N" else KAPPA / (KAPPA + tot[ii])
                 sw = sum(w.values())
                 for st in (S_EMPTY, S_RUNNER2):
                     base = slot_pick(pool, st)
@@ -248,26 +254,26 @@ def run_season(a) -> None:
 
         def pen_dist(tab, i2, h2, st):
             """(ND, R): the bullpen's distribution for every start difference."""
-            ii = 3 if i2 >= 10 else i2 - 7
+            ii = 10 - FIRST if i2 >= 10 else i2 - FIRST
             sign = 1 if h2 == "top" else -1            # fielding team = home in the top half: lead = D
             return np.stack([tab[(ii, ls, st)] for ls in LEAD_OF_D[sign]])
 
         def start_dist(i2, h2, st):
             if h2 == half:
                 q = qx[i2] if i2 < 13 else 0.0
-                pen_part = avg(X_pen, st) if i2 < 7 else pen_dist(Xl, i2, h2, st)
+                pen_part = avg(X_pen, st) if i2 < FIRST else pen_dist(Xl, i2, h2, st)
                 return q * avg(dist_now, st) + (1 - q) * pen_part
             q = qy[i2] if i2 < 13 else 0.0
             if (i2, h2) == first_y:
-                pen_part = nxt(Y_pen, st) if i2 < 7 else pen_dist(Yl_first, i2, h2, st)
+                pen_part = nxt(Y_pen, st) if i2 < FIRST else pen_dist(Yl_first, i2, h2, st)
                 return q * nxt(Y_vs_bp, st) + (1 - q) * pen_part
-            pen_part = avg(Y_pen, st) if i2 < 7 else pen_dist(Yl_avg, i2, h2, st)
+            pen_part = avg(Y_pen, st) if i2 < FIRST else pen_dist(Yl_avg, i2, h2, st)
             return q * avg(Y_vs_bp, st) + (1 - q) * pen_part
 
         for v in variants:
             Xl = late(ft, used_f, half, bl, pen_f, avg, v)
             Yl_avg = late(bt, used_b, other, fl, pen_b, avg, v)
-            Yl_first = late(bt, used_b, other, fl, pen_b, nxt, v) if first_y[0] >= 7 else None
+            Yl_first = late(bt, used_b, other, fl, pen_b, nxt, v) if first_y[0] >= FIRST else None
             H = GP.game_wp(start_dist, sched)
             for i in rows:
                 st, slt, inn_i, diff = col["sidx"][i], col["slot"][i], int(col["inning"][i]), int(col["diff"][i])
@@ -279,7 +285,7 @@ def run_season(a) -> None:
     for v in variants:
         d["wp_new"] = outs[v]
         d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(
-            a.out / f"pen{v}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
+            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
 
@@ -330,7 +336,11 @@ def main() -> None:
     ap.add_argument("--part", help="K/N: only games K, K+N, K+2N, ... of the season (parallel runs)")
     ap.add_argument("--load-seasons", type=lambda x: [int(v) for v in x.split(",")],
                     help="seasons to load (default 2021-2025); e.g. 2021,...,2026 to predict 2026 with tables fitted on the others")
+    ap.add_argument("--first-inning", type=int, default=7,
+                    help="first inning whose relievers come from usage (default 7 = the tested layer)")
     a = ap.parse_args()
+    global FIRST
+    FIRST = a.first_inning
     a.out.mkdir(parents=True, exist_ok=True)
     if a.season is None:
         summarize(a)
