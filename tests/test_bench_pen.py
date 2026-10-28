@@ -78,8 +78,8 @@ def _closer_case():
     pit = dict(data.pit)
     pit[closer] = np.array([400, 20, 60, 15, 1, 5, 500], float)          # a dominant arm (K BB 1B 2B 3B HR OUT)
     data = replace(data, pit=pit)
-    u_c = np.zeros((3, 4)); u_c[2, 2] = 60                                  # 9th inning, ahead by 1-3
-    u_o = np.zeros((3, 4)); u_o[2, 0] = 60                                  # 9th inning, behind
+    u_c = np.zeros((3, 5)); u_c[2, 3] = 60                                  # 9th inning, ahead by 1-3 (5 lead states)
+    u_o = np.zeros((3, 5)); u_o[2, 1] = 60                                  # 9th inning, behind by 1-2
     data.pen_avail_fld = {closer: u_c, other: u_o}
     data.pen_avail_bat = {}
     return m, data, closer
@@ -111,24 +111,61 @@ def test_pen_plan_names_the_closer_for_the_ninth():
 def test_lead_state_of_the_fielding_team():
     import bench as B
     at = lambda d: MAX_DIFF + d                         # index of home - away = d
+    # 5 lead states (PENR rules): behind by 3+ / 1-2 / tied / ahead by 1-3 / ahead by 4+
     # top half: the home team fields, its lead = home - away
-    assert B.PEN_LEAD["top"][at(2)] == 2 and B.PEN_LEAD["top"][at(-1)] == 0 and B.PEN_LEAD["top"][at(5)] == 3
+    assert B.PEN_LEAD["top"][at(2)] == 3 and B.PEN_LEAD["top"][at(-1)] == 1 and B.PEN_LEAD["top"][at(5)] == 4
+    assert B.PEN_LEAD["top"][at(-3)] == 0
     # bottom half: the away team fields, its lead = away - home
-    assert B.PEN_LEAD["bottom"][at(-1)] == 2 and B.PEN_LEAD["bottom"][at(1)] == 0 and B.PEN_LEAD["bottom"][at(0)] == 1
+    assert B.PEN_LEAD["bottom"][at(-1)] == 3 and B.PEN_LEAD["bottom"][at(1)] == 1 and B.PEN_LEAD["bottom"][at(0)] == 2
 
 
-def test_bench_mixture_uses_60_days_and_default_stays_30():
+def test_bench_mixture_follows_the_penr_rules_and_defaults_stay():
     import bench_live as BL
-    assert PU.BENCH_WINDOW_DAYS == 60 and PU.WINDOW_DAYS == 30     # PREREG_PENW (H1 supported); frozen study keeps 30
-    t, d0 = RAW["late"][len(RAW["late"]) // 2][:2]
+    # PREREG_PENW / PREREG_PENR (H1 supported): 60 days, 5 lead states, KAPPA 0.25; the study's pick keeps 30 / 4 / 30
+    assert (PU.BENCH_WINDOW_DAYS, PU.BENCH_STATES, PU.BENCH_KAPPA) == (60, 5, 0.25)
+    assert (PU.WINDOW_DAYS, PU.KAPPA) == (30, 30.0)
+    t, d0 = RAW["late5"][len(RAW["late5"]) // 2][:2]
     day = date.fromisoformat(d0)
     exp = {}
-    for tt, dd, p, ii, ls, n in RAW["late"]:
+    for tt, dd, p, ii, ls, n in RAW["late5"]:
         x = date.fromisoformat(dd)
         if tt == t and day - timedelta(days=60) <= x < day:
-            exp.setdefault(p, np.zeros((3, 4)))[ii, ls] += n
+            exp.setdefault(p, np.zeros((3, 5)))[ii, ls] += n
     gd = {"datetime": {"officialDate": d0}, "game": {"type": "R"}}
     got = BL.pen_usage_for(gd, t, None)
     tired = PU.tired(t, day)
     assert set(got) == {p for p in exp if p not in tired}
     assert all(np.array_equal(got[p], exp[p]) for p in got)
+
+
+def test_five_state_rows_collapse_to_the_four_state_rows():
+    four = {}
+    for t, d, p, ii, ls, n in RAW["late"]:
+        four[(t, d, p, ii, ls)] = four.get((t, d, p, ii, ls), 0) + n
+    five = {}
+    for t, d, p, ii, ls, n in RAW["late5"]:
+        k = (t, d, p, ii, {0: 0, 1: 0, 2: 1, 3: 2, 4: 3}[ls])
+        five[k] = five.get(k, 0) + n
+    assert four == five
+    assert [PU.lead_state5(x) for x in (-5, -3, -2, -1, 0, 1, 3, 4)] == [0, 0, 1, 1, 2, 3, 3, 4]
+
+
+def test_bench_pool_weight_is_kappa_025():
+    m, data, closer = _closer_case()
+    av = {p: u for p, u in data.pen_avail_fld.items() if p != m.pitcher}
+    W, tot = PU.weights(av, list(av), "B", states=5)
+    plan = BL.pen_plan(replace(m, diff=-2), data, {closer: "CLOSER"})
+    ninth = next(r for r in plan if r["inning"] == 9)
+    assert abs(ninth["other"] - (1 - sum(x for _, x in ninth["rows"]))) < 1e-12
+    assert abs(sum(x for _, x in ninth["rows"]) - (1 - 0.25 / (0.25 + tot))) < 1e-9
+
+
+def test_bench_later_halves_use_the_bench_kappa(monkeypatch):
+    m, data, closer = _closer_case()
+    b = BL._bench(True)
+    out = {}
+    for k in (0.25, 30.0):
+        monkeypatch.setattr(PU, "BENCH_KAPPA", k)
+        b._cache = {}
+        out[k] = b.later_halves(m, data, m.lineup)[(9, "bottom")]
+    assert np.abs(out[0.25] - out[30.0]).max() > 1e-4      # the pool weight in bench.py follows BENCH_KAPPA

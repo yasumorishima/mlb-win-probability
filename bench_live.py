@@ -149,7 +149,7 @@ def pen_usage_for(gd: dict, team, bullpen) -> dict | None:
     d = date.fromisoformat(day[:10])
     if not PU.available(d.year):
         return None
-    u, tired = PU.usage(int(team), d, window=PU.BENCH_WINDOW_DAYS), PU.tired(int(team), d)
+    u, tired = PU.usage(int(team), d, window=PU.BENCH_WINDOW_DAYS, states=PU.BENCH_STATES), PU.tired(int(team), d)
     roster = {int(i) for i in bullpen or []}
     return {p: v for p, v in u.items() if p not in tired and (not roster or p in roster)}
 
@@ -241,10 +241,10 @@ def pen_plan(m, data, names: dict, top: int = 3) -> list[dict] | None:
     if data.pen_avail_fld is None:
         return None
     av = {p: u for p, u in data.pen_avail_fld.items() if p != m.pitcher}
-    W, tot = PU.weights(av, list(av), "B")
-    pool_w = PU.KAPPA / (PU.KAPPA + tot)
+    W, tot = PU.weights(av, list(av), "B", states=PU.BENCH_STATES)
+    pool_w = PU.pool_weight(tot, PU.BENCH_KAPPA)
     lead = m.diff if m.half == "top" else -m.diff          # the fielding team is home in the top half
-    ls = PU.lead_state(int(lead))
+    ls = PU.lead_state_n(int(lead), PU.BENCH_STATES)
     out = []
     for ii, inn in enumerate((7, 8, 9)):
         if inn < m.inning:

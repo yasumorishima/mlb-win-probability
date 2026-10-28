@@ -28,11 +28,27 @@ import numpy as np
 HERE = Path(__file__).resolve().parent
 PUB = HERE / "published"
 WINDOW_DAYS, TAU, KAPPA = 30, 20.0, 30.0
-BENCH_WINDOW_DAYS = 60   # the bench options' bullpen mixture (PREREG_PENW, H1 supported); the usage-pattern pick keeps 30
+# The bench options' bullpen mixture follows the look-back win probability's rules (PENR_RECAL:
+# PREREG_PENW / PREREG_PENR, both H1 supported): 60 days, 5 lead states, KAPPA 0.25. The defaults
+# above (30 days, 4 states, KAPPA 30) stay for the bench-call study's usage-pattern pick.
+BENCH_WINDOW_DAYS, BENCH_STATES, BENCH_KAPPA = 60, 5, 0.25
 
 
 def lead_state(lead: int) -> int:
     return 0 if lead < 0 else 1 if lead == 0 else 2 if lead <= 3 else 3
+
+
+def lead_state5(lead: int) -> int:
+    """size_pen_x2.py --lead5: behind by 3+ / behind by 1-2 / tied / ahead by 1-3 / ahead by 4+."""
+    return 0 if lead <= -3 else 1 if lead < 0 else 2 if lead == 0 else 3 if lead <= 3 else 4
+
+
+def lead_state_n(lead: int, states: int) -> int:
+    return lead_state5(lead) if states == 5 else lead_state(lead)
+
+
+def pool_weight(tot: float, kappa: float = KAPPA) -> float:
+    return kappa / (kappa + tot)
 
 
 @lru_cache(maxsize=8)
@@ -41,27 +57,32 @@ def _load(season: int):
     if not p.exists():
         return None
     raw = json.loads(p.read_text())
-    late, relief = {}, {}
+    late, late5, relief = {}, {}, {}
     for t, d, pid, ii, ls, n in raw["late"]:
         late.setdefault(int(t), []).append((Date.fromisoformat(d), int(pid), int(ii), int(ls), int(n)))
+    for t, d, pid, ii, ls, n in raw.get("late5", []):
+        late5.setdefault(int(t), []).append((Date.fromisoformat(d), int(pid), int(ii), int(ls), int(n)))
     for t, d, pid in raw["relief"]:
         relief.setdefault((int(t), Date.fromisoformat(d)), set()).add(int(pid))
-    return late, relief
+    return late, relief, late5
 
 
 def available(season: int) -> bool:
     return _load(season) is not None
 
 
-def usage(team: int, day: Date, season: int | None = None, window: int = WINDOW_DAYS) -> dict:
+def usage(team: int, day: Date, season: int | None = None, window: int = WINDOW_DAYS, states: int = 4) -> dict:
     got = _load(season or day.year)
     if got is None:
         return {}
     lo = day - timedelta(days=window)
+    rows = got[2] if states == 5 else got[0]
+    if states == 5 and not got[2]:
+        raise ValueError("usage table without 5-state rows: rebuild with build_usage.py")
     u = {}
-    for d, pid, ii, ls, n in got[0].get(int(team), []):
+    for d, pid, ii, ls, n in rows.get(int(team), []):
         if lo <= d < day:
-            u.setdefault(pid, np.zeros((3, 4)))[ii, ls] += n
+            u.setdefault(pid, np.zeros((3, states)))[ii, ls] += n
     return u
 
 
@@ -73,7 +94,7 @@ def tired(team: int, day: Date, season: int | None = None) -> set:
     return rel.get((int(team), day - timedelta(days=1)), set()) & rel.get((int(team), day - timedelta(days=2)), set())
 
 
-def weights(u: dict, avail, variant: str = "B") -> tuple[dict, float]:
+def weights(u: dict, avail, variant: str = "B", states: int | None = None) -> tuple[dict, float]:
     """Same as size_pen.mixture_weights."""
     W = {}
     avail = [p for p in avail if p in u]
@@ -81,7 +102,7 @@ def weights(u: dict, avail, variant: str = "B") -> tuple[dict, float]:
     for ii in range(4):
         rows = {p: (u[p] if ii == 3 else u[p][ii:ii + 1]) for p in avail}
         tot_i = sum(x.sum() for x in rows.values())
-        for ls in range(4):
+        for ls in range(states or (next(iter(u.values())).shape[1] if u else 4)):
             w = {}
             for p, x in rows.items():
                 v = x.sum() if variant == "A" else x[:, ls].sum() + TAU * x.sum() / max(tot_i, 1.0)
