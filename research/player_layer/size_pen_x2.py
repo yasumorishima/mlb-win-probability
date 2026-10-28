@@ -74,13 +74,16 @@ S_EMPTY, S_RUNNER2 = G.S_EMPTY, G.S_RUNNER2
 
 
 LEAD5 = False      # lead states split "behind" into behind by 3+ / behind by 1-2 (CLI --lead5)
+LEAD6 = False      # --lead5 plus "ahead by 1-3" split into ahead by 1 / ahead by 2-3 (CLI --lead6)
 
 
 def n_lead() -> int:
-    return 5 if LEAD5 else 4
+    return 6 if LEAD6 else 5 if LEAD5 else 4
 
 
 def lead_state(lead: int) -> int:
+    if LEAD6:
+        return 0 if lead <= -3 else 1 if lead < 0 else 2 if lead == 0 else 3 if lead == 1 else 4 if lead <= 3 else 5
     if LEAD5:
         return 0 if lead <= -3 else 1 if lead < 0 else 2 if lead == 0 else 3 if lead <= 3 else 4
     return 0 if lead < 0 else 1 if lead == 0 else 2 if lead <= 3 else 3
@@ -342,7 +345,7 @@ def run_season(a) -> None:
     for v in variants:
         d["wp_new"] = outs[v]
         d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(
-            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}{'_pc' if PC_EDGES is not None else ''}{'_plc' if PLACEBO else ''}{'_w' + str(WINDOW_DAYS) if WINDOW_DAYS != 30 else ''}{'_l5' if LEAD5 else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
+            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}{'_pc' if PC_EDGES is not None else ''}{'_plc' if PLACEBO else ''}{'_w' + str(WINDOW_DAYS) if WINDOW_DAYS != 30 else ''}{'_l6' if LEAD6 else '_l5' if LEAD5 else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
 
@@ -401,12 +404,14 @@ def main() -> None:
     ap.add_argument("--pc-edges", type=lambda x: [int(v) for v in x.split(",")],
                     help="starter-length buckets by pitches thrown, e.g. 0,30,45,60,75,85,95,105,1000")
     ap.add_argument("--window", type=int, default=30, help="usage window in days (default 30 = the tested layer)")
+    ap.add_argument("--lead6", action="store_true", help="six lead states (also ahead by 1 / 2-3 split)")
     ap.add_argument("--lead5", action="store_true", help="five lead states (behind by 3+ / 1-2 split)")
     ap.add_argument("--placebo", action="store_true", help="diagnostic: usage roles shuffled within each team")
     a = ap.parse_args()
-    global FIRST, TTO, TTO_ADVANCE, PC_EDGES, PLACEBO, WINDOW_DAYS, LEAD5, LEAD_OF_D
+    global FIRST, TTO, TTO_ADVANCE, PC_EDGES, PLACEBO, WINDOW_DAYS, LEAD5, LEAD6, LEAD_OF_D
     WINDOW_DAYS = a.window
     LEAD5 = a.lead5
+    LEAD6 = a.lead6
     LEAD_OF_D = {sign: np.array([lead_state(int(sign * d)) for d in G.D]) for sign in (1, -1)}
     PC_EDGES = a.pc_edges
     PLACEBO = a.placebo
