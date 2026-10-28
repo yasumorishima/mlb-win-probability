@@ -56,6 +56,7 @@ C = R.PA_CLASSES
 WINDOW_DAYS, TAU, KAPPA = 30, 20.0, 30.0
 LATE = (7, 8, 9)
 LEADS = ("behind", "tied", "close", "big")
+NEW_PARKS = {2025: ("OAK", "TB"), 2026: ("OAK", "TB")}   # park factor = average (venue not in the 3-year window), as test_2026.py
 S_EMPTY, S_RUNNER2 = G.S_EMPTY, G.S_RUNNER2
 
 
@@ -140,7 +141,8 @@ def mixture_weights(u: dict, avail: set, variant: str) -> tuple[dict, float]:
 
 def run_season(a) -> None:
     t0 = time.time()
-    pa = R.lineup_slots(R.load_pa(a.states, SEASONS))
+    seasons = a.load_seasons or SEASONS
+    pa = R.lineup_slots(R.load_pa(a.states, seasons))
     bat = R.prior_class_counts(pa, "batter", C).set_index(["batter", "date"])
     pit = R.prior_class_counts(pa, "pitcher", C).set_index(["pitcher", "date"])
     bat = dict(zip(bat.index, bat[C].to_numpy(float)))
@@ -152,7 +154,7 @@ def run_season(a) -> None:
     pa["bf_before"] = done.groupby([pa.game_pk, pa.pitcher]).cumsum() - done
     pen = bullpen_counts(pa)
     parks = park_table(a.hf)
-    pitch = pd.concat([pd.read_parquet(a.states / f"pitch_{s}.parquet") for s in SEASONS], ignore_index=True)
+    pitch = pd.concat([pd.read_parquet(a.states / f"pitch_{s}.parquet") for s in seasons], ignore_index=True)
     pa["sidx"] = [STATES.index(_state(o, _occ(x), _occ(y), _occ(z)))
                   for o, x, y, z in pa[["outs", "on_1b", "on_2b", "on_3b"]].itertuples(index=False)]
     pa["diff"] = pa.home_score - pa.away_score
@@ -170,6 +172,10 @@ def run_season(a) -> None:
     d = pa[pa.season == s].copy()
     if a.games:
         d = d[d.game_pk.isin(pd.unique(d.game_pk)[:a.games])].copy()
+    if a.part:
+        k, n = (int(x) for x in a.part.split("/"))
+        ug = pd.unique(d.game_pk)
+        d = d[d.game_pk.isin(ug[k::n])].copy()
     d["used_f"], d["used_b"] = used_before(d)
     d["bf_b"] = [bf_bucket(x) for x in d.bf_before]
     d["ybf_b"] = [bf_bucket(x) for x in d.bat_pitcher_bf]
@@ -196,7 +202,7 @@ def run_season(a) -> None:
         r0 = rows[0]
         date, bt, ft, sched = col["date"][r0], col["bat_team"][r0], col["fld_team"][r0], int(col["scheduled_innings"][r0])
         hab = ABBR.get(int(col["home_team"][r0]))
-        park = None if (s == 2025 and hab in ("OAK", "TB")) else parks.get((hab, s))
+        park = None if hab in NEW_PARKS.get(s, ()) else parks.get((hab, s))
         pen_f, pen_b = pen.get((ft, s, date), zeros), pen.get((bt, s, date), zeros)
 
         def rd(h, ids, pid, pc, fld):
@@ -273,7 +279,7 @@ def run_season(a) -> None:
     for v in variants:
         d["wp_new"] = outs[v]
         d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(
-            a.out / f"pen{v}_{s}{'_g' + str(a.games) if a.games else ''}.parquet", index=False)
+            a.out / f"pen{v}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
 
@@ -321,6 +327,9 @@ def main() -> None:
     ap.add_argument("--variant", default="A",
                     help="letters of A, B, N; N = pooled bullpen only: must equal size_game2 'starter' (gate)")
     ap.add_argument("--games", type=int, help="only the first N games of the season (gate / timing)")
+    ap.add_argument("--part", help="K/N: only games K, K+N, K+2N, ... of the season (parallel runs)")
+    ap.add_argument("--load-seasons", type=lambda x: [int(v) for v in x.split(",")],
+                    help="seasons to load (default 2021-2025); e.g. 2021,...,2026 to predict 2026 with tables fitted on the others")
     a = ap.parse_args()
     a.out.mkdir(parents=True, exist_ok=True)
     if a.season is None:
