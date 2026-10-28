@@ -345,7 +345,7 @@ def run_season(a) -> None:
     for v in variants:
         d["wp_new"] = outs[v]
         d[["game_pk", "at_bat_index", "season", "wp_new"]].to_parquet(
-            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}{'_pc' if PC_EDGES is not None else ''}{'_plc' if PLACEBO else ''}{'_w' + str(WINDOW_DAYS) if WINDOW_DAYS != 30 else ''}{'_l6' if LEAD6 else '_l5' if LEAD5 else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
+            a.out / f"pen{v}{'_f' + str(FIRST) if FIRST != 7 else ''}{('_tto' if TTO_ADVANCE else '_ttonow') if TTO is not None else ''}{'_pc' if PC_EDGES is not None else ''}{'_plc' if PLACEBO else ''}{'_w' + str(WINDOW_DAYS) if WINDOW_DAYS != 30 else ''}{'_l6' if LEAD6 else '_l5' if LEAD5 else ''}{'_k' + str(int(KAPPA)) if KAPPA != 30.0 else ''}_{s}{'_g' + str(a.games) if a.games else ''}{'_part' + a.part.split('/')[0] if a.part else ''}.parquet", index=False)
     print("season", s, "segments", n_seg, round(time.time() - t0), "s", flush=True)
 
 
@@ -404,14 +404,17 @@ def main() -> None:
     ap.add_argument("--pc-edges", type=lambda x: [int(v) for v in x.split(",")],
                     help="starter-length buckets by pitches thrown, e.g. 0,30,45,60,75,85,95,105,1000")
     ap.add_argument("--window", type=int, default=30, help="usage window in days (default 30 = the tested layer)")
+    ap.add_argument("--kappa", type=float, help="pool weight KAPPA / (KAPPA + usage PAs); default 30")
     ap.add_argument("--lead6", action="store_true", help="six lead states (also ahead by 1 / 2-3 split)")
     ap.add_argument("--lead5", action="store_true", help="five lead states (behind by 3+ / 1-2 split)")
     ap.add_argument("--placebo", action="store_true", help="diagnostic: usage roles shuffled within each team")
     a = ap.parse_args()
-    global FIRST, TTO, TTO_ADVANCE, PC_EDGES, PLACEBO, WINDOW_DAYS, LEAD5, LEAD6, LEAD_OF_D
+    global FIRST, TTO, TTO_ADVANCE, PC_EDGES, PLACEBO, WINDOW_DAYS, LEAD5, LEAD6, LEAD_OF_D, KAPPA
     WINDOW_DAYS = a.window
     LEAD5 = a.lead5
     LEAD6 = a.lead6
+    if a.kappa is not None:
+        KAPPA = a.kappa
     LEAD_OF_D = {sign: np.array([lead_state(int(sign * d)) for d in G.D]) for sign in (1, -1)}
     PC_EDGES = a.pc_edges
     PLACEBO = a.placebo
