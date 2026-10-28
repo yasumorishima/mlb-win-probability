@@ -182,6 +182,23 @@ likely reason is selection: a starter who is still pitching later in the game is
 which the starter-length model already reflects, so a penalty for his later times through overstates
 it. Not taken further (PEN_RECAL stays).
 
+## Starter length by pitch count (sizing 2022-2025, 2026 not read)
+`size_pen_x.py --pc-edges 0,30,45,60,75,85,95,105,1000` (`starter_pc.py`): the chance that the starter begins
+a later inning is looked up by his pitches thrown so far (8 buckets, edges fixed before the run) instead of
+batters faced (5 buckets); everything else as PEN. Pitches come from `pitch_<season>.parquet` (all pitches
+of a plate appearance are credited to the pitcher on record). Gates: the table with batters faced in place
+of pitches equals `size_game2.starter_table` (diff 0); without the option `size_pen_x.py` equals the frozen
+`size_pen.py` on the 40-game file of 2022 (diff 0). Recalibrated out of fold as PEN_RECAL (`size_vs_pen.py`,
+`published/size_vs_pen_pc.json`):
+
+| | Brier (recalibrated) | minus PEN_RECAL (95%) | by season 2022-2025 |
+|---|---|---|---|
+| PEN_RECAL (batters faced) | 0.153362 | | |
+| pitches thrown | 0.153347 | -0.000015 (-0.000033 to +0.000004) | -0.000017, +0.000009, -0.000024, -0.000028 |
+
+Not better in every season (2023 worse) and the interval includes 0: no gain at this size, not taken
+further (PEN_RECAL stays). Band 0.3-0.5 unchanged (+0.55 pt).
+
 ## Next
 1. Compare with the team layer on the same rows (the team layer was
    fitted on 2021-2025, so only a 2026 comparison is fair), then freeze a
