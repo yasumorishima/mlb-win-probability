@@ -18,9 +18,12 @@ recalibrated out of fold as PENW_RECAL and compared with it (`size_vs_base.py --
 | five states, KAPPA 1 | −0.0001736 | all negative | `size_vs_penw_l5k1.json` |
 | **five states, KAPPA 0.25** | **−0.0001789 (−0.0002143 to −0.0001460)** | **all negative** | `size_vs_penw_l5k025.json` |
 
-KAPPA 0 divides by zero for a team with no usage in the window (runs failed, no output). KAPPA 0.25 was
-chosen because its 2022-2025 mean was lowest (as the 60-day window was chosen); it is within 0.000005 of
-KAPPA 1. KAPPA sets the pool weight KAPPA / (KAPPA + usage plate appearances of the available relievers):
+KAPPA 0 was also attempted (a seventh arm): it divides by zero for a team with no usage in the window,
+the runs failed and wrote nothing. KAPPA 0.25 was chosen because its 2022-2025 mean was lowest (as the
+60-day window was chosen); it is within 0.000005 of KAPPA 1. It is the smallest value tried (an edge of
+the grid) and was picked on the same 2022-2025 data that fits the recalibration, so the −0.00018 is an
+optimistic estimate; the 2025 rehearsal below is not independent either (2025 was part of the selection).
+File names use `_k0` for KAPPA 0.25 (`int(KAPPA)`); the md5s below identify the files. KAPPA sets the pool weight KAPPA / (KAPPA + usage plate appearances of the available relievers):
 with 0.25 the mixture of the team's own relievers is used almost unshrunk whenever any usage exists.
 The six-state version being clearly worse than the five-state one is not understood; it is reported,
 not explained.
@@ -66,6 +69,9 @@ every md5 below and the input data md5s (via `test_pen_2026.check_inputs`).
 Outputs `published/penr_2026.parquet`, `published/results_penr_2026.json`, `RESULTS_PENR_2026.md`.
 
 ## What follows
+Reading: H1 tests this specific setting (five lead states **and** KAPPA 0.25). Most of the sizing gain
+came from KAPPA (five states alone −0.0000186), so a supported H1 does not show that the five lead states
+in particular help.
 - H1 supported → the look-back view's win probability series becomes PENR_RECAL (2022-2026 games,
   2022-2025 from the sizing predictions recalibrated with `penr_recal_coef.json`). The bench options'
   bullpen mixture and the usage-pattern pick are not changed by this test (they keep the PENW rules /

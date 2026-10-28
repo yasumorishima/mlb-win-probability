@@ -1,11 +1,11 @@
 """
 Pre-registered test of PENR_RECAL on 2026 (PREREG_PENR.md).
 
-PENR_RECAL = PENR_RECAL (60-day usage) with the bullpen roles refined: five lead
+PENR_RECAL = PENW_RECAL (60-day usage) with the bullpen roles refined: five lead
 states (behind by 3+ / behind by 1-2 / tied / ahead by 1-3 / ahead by 4+) and the
 pool weight KAPPA 0.25 instead of 30 (size_pen_x2.py --window 60 --lead5 --kappa 0.25,
 variant B), recalibrated with the same logistic layer fitted on its 2022-2025
-out-of-fold sizing predictions only. The comparison arm PENR_RECAL is the frozen,
+out-of-fold sizing predictions only. The comparison arm PENW_RECAL is the frozen,
 already scored 2026 prediction (published/penw_2026.parquet, PREREG_PENW.md).
 
   fit      : python test_penr_2026.py fit --states S --pen P
@@ -41,7 +41,7 @@ COEF = HERE / "published/penr_recal_coef.json"
 PEN_FILE = HERE / "published/penw_2026.parquet"           # frozen PENW_RECAL 2026 predictions (PREREG_PENW)
 TEAM_FILE = ROOT / "research/wp_layer/published/pred_2026.parquet"
 PENR26_FILES = [HERE / f"published/penB_w60_l5_k0_2026_part{k}.parquet" for k in range(4)]
-PEN_RESULTS = HERE / "published/results_penr_2026.json"    # its pred_md5 pins PEN_FILE
+PEN_RESULTS = HERE / "published/results_penw_2026.json"    # its pred_md5 pins PEN_FILE
 TAG = "penB_w60_l5_k0"
 PREREG = HERE / "PREREG_PENR.md"
 
@@ -185,8 +185,8 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("mode", choices=["fit", "dry", "predict", "score"])
     ap.add_argument("--states", type=Path, required=True)
-    ap.add_argument("--pen", type=Path, help="size_pen_x.py --window 60 sizing output (penB_w60_2022..2025)")
-    ap.add_argument("--pen30", type=Path, help="size_pen.py sizing output (penB_2022..2025) for dry")
+    ap.add_argument("--pen", type=Path, help="size_pen_x2.py --window 60 --lead5 --kappa 0.25 sizing output (penB_w60_l5_k0_2022..2025)")
+    ap.add_argument("--pen30", type=Path, help="size_pen_x.py --window 60 sizing output (penB_w60_2022..2025) for dry")
     ap.add_argument("--hf", type=Path, help="dir with HF park_factors.parquet (md5-checked)")
     ap.add_argument("--out", type=Path)
     a = ap.parse_args()

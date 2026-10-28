@@ -1,5 +1,6 @@
 """
-size_pen_x2.py: size_pen_x.py (frozen in PREREG_PENW) plus --lead5. Never edit size_pen_x.py.
+size_pen_x2.py: size_pen_x.py (frozen in PREREG_PENW) plus --lead5, --lead6, --kappa. Never edit size_pen_x.py.
+File tag '_k' + int(KAPPA): '_k0' is KAPPA 0.25 in every file written so far (KAPPA 0 runs crashed before writing).
 
 size_pen_x.py: size_pen.py (frozen in PREREG_PEN.md, md5 d2170512...) plus sizing options
 (--load-seasons is in both; --first-inning, --tto, --tto-now-only, --pc-edges only here).
