@@ -230,6 +230,17 @@ same rules otherwise). Recalibrated out of fold as PEN_RECAL (`size_vs_pen.py`).
 Both longer windows are better in every season; 60 days has the lower mean and goes to a pre-registered
 test on 2026 against PEN_RECAL (`PREREG_PENW.md`).
 
+## Role refinements after the 60-day window (sizing 2022-2025, 2026 not read for any choice)
+All recalibrated out of fold and compared with the layer before them (`size_vs_base.py`):
+- five lead states (behind split into 3+ / 1-2) −0.0000186, six (also ahead 1 / 2-3) +0.000087 (worse);
+- pool weight KAPPA 15 / 5 / 1 / 0.25 with five states −0.000090 / −0.000147 / −0.000174 / −0.000179
+  (KAPPA 0 divides by zero) → PENR_RECAL (`PREREG_PENR.md`, supported on 2026);
+- lead-state smoothing TAU 5 / 1 / 0 on top of PENR −0.000164 / −0.000246 / −0.000203 → PENT_RECAL
+  (`PREREG_PENT.md`, supported on 2026);
+- usage window 90 days on top of PENT +0.000064 (95% +0.000046 to +0.000083), worse in every season
+  (`published/size_vs_pent_w90.json`) → 60 days stays.
+Every value above was better / worse in all four seasons as stated.
+
 ## Next
 1. Compare with the team layer on the same rows (the team layer was
    fitted on 2021-2025, so only a 2026 comparison is fair), then freeze a
