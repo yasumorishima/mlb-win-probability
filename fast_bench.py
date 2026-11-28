@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import os
+import threading
 from collections import OrderedDict
 
 import sys
@@ -82,6 +83,14 @@ class FastBench(B.Bench):
         self._ct_digest: dict = {}           # id(table) -> (table, digest); holds the table so its id stays unique
         self.cache_size = cache_size
         self.stats = {"calls": 0, "hits": 0}
+        self.lock = threading.Lock()
+
+    def options(self, *a, **k):
+        """The frozen Bench keeps per-call state on the instance (_cache, _data),
+        and the app shares one instance between sessions (threads): one call at
+        a time. The lock also covers the memos below."""
+        with self.lock:
+            return super().options(*a, **k)
 
     def _table_digest(self, P, T) -> bytes:
         k = (id(P), id(T))
@@ -171,7 +180,7 @@ class FastBench(B.Bench):
             got = (dd, dd[:, st].mean(axis=0))            # holding dd keeps its id unique
             got[1].setflags(write=False)
             self._avg_memo[k] = got
-            if len(self._avg_memo) > 4 * self.cache_size:
+            if len(self._avg_memo) > self.cache_size:     # bounds the run tables it keeps alive
                 self._avg_memo.clear()
         return got[1]
 

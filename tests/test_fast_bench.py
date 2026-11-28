@@ -154,3 +154,63 @@ def test_app_uses_fastbench_and_falls_back_without_rust(monkeypatch):
     assert b.backend == "python"
     with pytest.raises(RuntimeError):
         FB.FastBench(_eng(True), FB.freeze_tables(BL._snapshot()["_ct"]), backend="rust")
+
+
+def test_installed_wheel_was_built_from_this_source():
+    """A stale committed wheel (wheels/) fails here: rebuild it after any change to rust/wpfast/src/lib.rs."""
+    if not FB.rust_available():
+        pytest.skip("wpfast not installed")
+    h = 0xcbf29ce484222325
+    for b in (ROOT / "rust" / "wpfast" / "src" / "lib.rs").read_bytes():
+        h = ((h ^ b) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    assert FB._wpfast.source_fnv() == f"{h:016x}"
+
+
+def test_one_options_call_at_a_time():
+    """The frozen Bench keeps per-call state on the instance and the app shares
+    one instance between sessions (threads): options() must wait for the lock."""
+    import threading
+    TL = R.timeline(FEED)
+    got = R.moment_at(FEED, TL[3]["k"])
+    b = BL._bench(got[0].extra_runner)
+    ref = json.dumps(BL.bench_options(FEED, got=got), default=str, sort_keys=True)
+    out = []
+    with b.lock:
+        th = threading.Thread(target=lambda: out.append(json.dumps(BL.bench_options(FEED, got=got), default=str, sort_keys=True)))
+        th.start()
+        th.join(timeout=2.0)
+        assert th.is_alive() and not out              # blocked while another call holds the instance
+    th.join(timeout=60)
+    assert out == [ref]
+
+
+@pytest.mark.parametrize("backend", BACKENDS)
+def test_game_wp_table_equals_the_frozen_recursion(backend):
+    """_game_wp (table + python / Rust) vs frozen game_pen.game_wp: regular season
+    and postseason (no automatic runner), 9 and 7 innings, 1-D and (ND, R) start
+    distributions, empty run columns."""
+    import game as G
+    import game_pen as GP
+    rng = np.random.default_rng(7)
+    R_ = FB.MAX_RUNS + 1
+    tab = {}
+
+    def sd(i, h, st):
+        k = (i, h, st)
+        if k not in tab:
+            if (i + (h == "top")) % 3 == 0:
+                x = rng.random((G.ND, R_)) ** 3
+                x[:, 5:] = 0.0
+                x /= x.sum(axis=1, keepdims=True)
+            else:
+                x = rng.random(R_) ** 3
+                x[2] = 0.0
+                x /= x.sum()
+            tab[k] = x
+        return tab[k]
+    b = FB.FastBench(_eng(True), FB.freeze_tables(BL._snapshot()["_ct"]), backend=backend)
+    for sched in (9, 7):
+        for er in (True, False):
+            H, ref = b._game_wp(sd, sched, extra_runner=er), GP.game_wp(sd, sched, extra_runner=er)
+            assert sorted(H) == sorted(ref)
+            assert max(float(np.abs(H[k] - ref[k]).max()) for k in ref) == 0.0

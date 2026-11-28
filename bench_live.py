@@ -31,6 +31,7 @@ import numpy as np
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / "research" / "player_layer"))
 import bench as B  # noqa: E402
+import fast_bench as FB  # noqa: E402
 import pen_usage as PU  # noqa: E402
 from live_feed import _BASE, _fetch, parse_live_state  # noqa: E402
 from wp_engine import Engine  # noqa: E402
@@ -67,7 +68,10 @@ def snapshot_for_season(season: int) -> str | None:
 
 @lru_cache(maxsize=2)
 def _bench(extra_runner: bool = True) -> B.Bench:
-    return B.Bench(Engine.load(ROOT / "engine_tables.json", extra_runner=extra_runner), _snapshot()["_ct"])
+    # FastBench = the frozen Bench + a content-keyed memo of run_dist (and the
+    # Rust backend when the wpfast extension is installed); tests/test_fast_bench.py
+    return FB.FastBench(Engine.load(ROOT / "engine_tables.json", extra_runner=extra_runner),
+                        FB.freeze_tables(_snapshot()["_ct"]))
 
 
 def get_feed(game_pk: int) -> dict | None:

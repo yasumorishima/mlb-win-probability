@@ -4,3 +4,4 @@ __pycache__/
 data/
 results/
 .streamlit/secrets.toml
+rust/wpfast/target/
