@@ -22,3 +22,20 @@ jobs:
 
       - name: Run tests
         run: pytest tests/ -v
+
+  wpfast-from-source:
+    # The Rust backend built from rust/wpfast (not the committed wheel) must
+    # match the frozen Python on the fixture game (tests/test_fast_bench.py).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies and build wpfast from source
+        run: |
+          pip install -r requirements.txt pytest httpx maturin
+          pip install --force-reinstall --no-deps ./rust/wpfast
+          python -c "import wpfast; print('wpfast', wpfast.source_fnv())"
+      - name: Equality tests (Rust vs frozen Python)
+        run: pytest tests/test_fast_bench.py -v

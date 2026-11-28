@@ -12,6 +12,7 @@ and how the model rated it among the options, and what happened next.
 from __future__ import annotations
 
 import html
+import time
 import json
 from datetime import date, timedelta
 from pathlib import Path
@@ -46,11 +47,12 @@ TXT = {
            "sum_note": "モデル評価＝打席の前に、その采配で采配したチームの勝率が「何もしない」よりどれだけ上がると見ていたか（ポイント）。"
                        "結果と勝率の変化は、実際に起きたこと（運を含む）。両者は別物です。"
                        "「対象外」＝前年の記録がない選手か、モデルが扱わない場面（満塁の代走など）。守備位置・休養・故障などはモデルに入っていません。",
-           "miss_btn": "🔎 モデルならここで動いた、という場面を探す（約 30 秒）",
+           "miss_btn": "🔎 モデルならここで動いた、という場面を探す（約 {n} 秒）",
            "miss_head": "モデルが 1 ポイント以上の上積みを見ていたのに、その種類の采配がなかった場面（大きい順）",
            "miss_none": "そのような場面はありませんでした（基準：1 ポイント以上）。",
            "miss_row": "{inn}　{team}：{opt}　{g:+.1f} ポイント",
            "miss_note": "継投は 7 回以降のみ（それより前は大きく出すぎるため）。盗塁は「走れ」の判定のときだけ。",
+           "miss_time": "探索 {s:.1f} 秒（計算: {b}、最初に計算したときの時間）",
            "pen_note": "選手・終盤の継投の使い方込みの勝率（2026 年で事前登録して検証済み）",
            "note_head": "📝 試合の解説", "note_cap": "Claude（Sonnet 5.5）が、この画面と同じ勝率と試合記録だけを渡されて事前に書いた文章です。数字とスコアは渡した値と一致するものだけを残しています。",
            "after_sub": "この打席で先にあった交代のあとの状況で評価",
@@ -76,11 +78,12 @@ TXT = {
            "sum_pick": "Pick a row to jump to that moment.",
            "sum_note": "Model = how many WP points the model expected the call to add for the team that made it, before the play. "
                        "Result and WP change are what happened (luck included); they are different things. 'not rated' = no previous-season record, or a situation the model does not cover (e.g. a pinch runner with the bases loaded). Positions, rest and injuries are not in the model.",
-           "miss_btn": "🔎 Find moments where the model would have moved (about 30 s)",
+           "miss_btn": "🔎 Find moments where the model would have moved (about {n} s)",
            "miss_head": "Moments where the model saw a gain of 1 point or more and no call of that kind was made (largest first)",
            "miss_none": "None (threshold: 1 point).",
            "miss_row": "{inn}  {team}: {opt}  {g:+.1f} pt",
            "miss_note": "Pitching changes from the 7th inning only (earlier ones are overstated). Steals only when the call is 'go'.",
+           "miss_time": "Search {s:.1f} s (backend: {b}; time of the first run)",
            "pen_note": "WP with players and late-inning bullpen usage (pre-registered, checked on 2026)",
            "note_head": "📝 Game note (Japanese)", "note_cap": "Written in advance by Claude (Sonnet 5.5) from the same win probabilities and play log as this screen; only notes whose numbers and scores match those inputs are kept.",
            "after_sub": "rated after the earlier substitution in this plate appearance",
@@ -236,12 +239,19 @@ def _review(pk: int) -> list[dict]:
 
 
 @st.cache_data(show_spinner=False, max_entries=8)
-def _missed(pk: int) -> list[dict]:
+def _missed_run(pk: int) -> dict:
+    """The search with how long it took and which backend ran it (fast_bench)."""
+    t0 = time.perf_counter()
     rows = bench_replay.missed_chances(_feed(pk))
+    sec = time.perf_counter() - t0
     for r in rows:
         o = r.pop("option")
         r["label_ja"], r["label_en"] = o["label_ja"], o.get("label_en", o["option"])
-    return rows
+    return {"rows": rows, "sec": sec, "backend": getattr(bench_live._bench(True), "backend", "python")}
+
+
+def _missed(pk: int) -> list[dict]:
+    return _missed_run(pk)["rows"]
 
 
 def _summary(lang: str, pk: int, feed: dict, x: dict) -> None:
@@ -306,10 +316,12 @@ def _summary(lang: str, pk: int, feed: dict, x: dict) -> None:
         st.session_state["review_view_next"] = 0
         st.rerun()
     # moments the model would have moved
-    if st.button(x["miss_btn"], key=f"review_miss_{pk}") or st.session_state.get("review_miss_pk") == pk:
+    fast = getattr(bench_live._bench(True), "backend", "python") == "rust"
+    if st.button(x["miss_btn"].format(n=5 if fast else 15), key=f"review_miss_{pk}") or st.session_state.get("review_miss_pk") == pk:
         st.session_state["review_miss_pk"] = pk
         with st.spinner(x["loading"]):
-            miss = _missed(pk)
+            run = _missed_run(pk)
+            miss = run["rows"]
         st.markdown(f"**{x['miss_head']}**")
         if not miss:
             st.caption(x["miss_none"])
@@ -321,6 +333,7 @@ def _summary(lang: str, pk: int, feed: dict, x: dict) -> None:
                 st.session_state["review_view_next"] = 0
                 st.rerun()
         st.caption(x["miss_note"])
+        st.caption(x["miss_time"].format(s=run["sec"], b="Rust" if run["backend"] == "rust" else "Python"))
 
 
 def render(lang: str) -> None:

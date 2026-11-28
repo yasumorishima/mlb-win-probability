@@ -8,3 +8,7 @@ pandas>=2.0
 pyarrow>=14
 pydantic>=2.6
 anthropic>=1.14
+# Rust backend of the look-back search (rust/wpfast, built for manylinux2014 x86_64 / Python >= 3.9;
+# fast_bench.py falls back to the frozen Python when it is not installed). The URL pins the commit that
+# added wheels/; after a rebuild, commit the new wheel first, then point this line at that commit.
+wpfast @ https://github.com/yasumorishima/mlb-win-probability/raw/9613275d034f5b22a0bf912783af9b376929d9e9/wheels/wpfast-0.1.0-cp39-abi3-manylinux2014_x86_64.manylinux_2_17_x86_64.whl#sha256=2b05712dab9bfe8e7ac6d6dc04f4ad556c24034d806fb2daf8cfcbe0c5eebc4d ; sys_platform == "linux" and platform_machine == "x86_64"

@@ -1,0 +1,18 @@
+[package]
+name = "wpfast"
+version = "0.1.0"
+edition = "2021"
+description = "Rust versions of the look-back search's two hot loops (layer.run_dist, game_pen.game_wp); the frozen Python is the reference"
+license = "MIT"
+
+[lib]
+name = "wpfast"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.23", features = ["extension-module", "abi3-py39"] }
+numpy = "0.23"
+
+[profile.release]
+opt-level = 3
+codegen-units = 1
